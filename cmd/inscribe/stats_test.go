@@ -25,9 +25,11 @@ func TestStatsIngestCLI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ev := inscribe.Event{Agent: "claude-code", Session: "s1", Project: "p", Kind: model.SessionEnd, TS: 1, TranscriptPath: tp}
-	if err := h.Capture(context.Background(), ev); err != nil {
-		t.Fatal(err)
+	for _, kind := range []model.EventKind{model.SessionStart, model.SessionEnd} {
+		ev := inscribe.Event{Agent: "claude-code", Session: "s1", Project: "p", Kind: kind, TS: 1, TranscriptPath: tp}
+		if err := h.Capture(context.Background(), ev); err != nil {
+			t.Fatal(err)
+		}
 	}
 	_ = h.Close()
 

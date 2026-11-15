@@ -44,6 +44,13 @@ func (e *env) touch(t *testing.T, session, transcript string, kind model.EventKi
 	}
 }
 
+// ended records a SessionStart then a SessionEnd: ingest skips a lone SessionEnd.
+func (e *env) ended(t *testing.T, session, transcript string, ts int64) {
+	t.Helper()
+	e.touch(t, session, transcript, model.SessionStart, ts-1)
+	e.touch(t, session, transcript, model.SessionEnd, ts)
+}
+
 func (e *env) status(t *testing.T, session string) (status sql.NullString, ingestedAt sql.NullInt64) {
 	t.Helper()
 	if err := e.db.QueryRow(`SELECT usage_status, usage_ingested_at FROM sessions WHERE id = ?`, session).Scan(&status, &ingestedAt); err != nil {
@@ -93,7 +100,7 @@ var now = time.UnixMilli(5000)
 func TestIngestSplitMessageAndSidechain(t *testing.T) {
 	e := newEnv(t)
 	p := e.write(t, "t.jsonl", fixture(t))
-	e.touch(t, "s1", p, model.SessionEnd, 100)
+	e.ended(t, "s1", p, 100)
 	n, err := IngestUsage(e.st, 20, now)
 	if err != nil || n != 1 {
 		t.Fatalf("n=%d err=%v", n, err)
@@ -120,7 +127,7 @@ func TestIngestSplitMessageAndSidechain(t *testing.T) {
 
 func TestIngestMissing(t *testing.T) {
 	e := newEnv(t)
-	e.touch(t, "s1", filepath.Join(e.dir, "gone.jsonl"), model.SessionEnd, 100)
+	e.ended(t, "s1", filepath.Join(e.dir, "gone.jsonl"), 100)
 	if n, err := IngestUsage(e.st, 20, now); err != nil || n != 1 {
 		t.Fatalf("n=%d err=%v", n, err)
 	}
@@ -132,7 +139,7 @@ func TestIngestMissing(t *testing.T) {
 func TestIngestUnparsed(t *testing.T) {
 	e := newEnv(t)
 	p := e.write(t, "t.jsonl", `{"type":"assistant","message":{"id":"a"}}`+"\n"+`{"type":"assistant","message":{"id":"b"}}`+"\n")
-	e.touch(t, "s1", p, model.SessionEnd, 100)
+	e.ended(t, "s1", p, 100)
 	if _, err := IngestUsage(e.st, 20, now); err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +154,7 @@ func TestIngestUnparsed(t *testing.T) {
 func TestIngestNoAssistantLines(t *testing.T) {
 	e := newEnv(t)
 	p := e.write(t, "t.jsonl", `{"type":"user","message":{"content":"hi"}}`+"\n")
-	e.touch(t, "s1", p, model.SessionEnd, 100)
+	e.ended(t, "s1", p, 100)
 	if _, err := IngestUsage(e.st, 20, now); err != nil {
 		t.Fatal(err)
 	}
@@ -165,12 +172,12 @@ func TestIngestReopened(t *testing.T) {
 		return `{"type":"assistant","timestamp":"` + ts + `","message":{"id":"` + id + `","model":"m","usage":{"input_tokens":1,"output_tokens":` + string(rune('0'+out)) + `}}}` + "\n"
 	}
 	p := e.write(t, "t.jsonl", line("m1", 3, "2026-11-14T10:00:00Z"))
-	e.touch(t, "s1", p, model.SessionEnd, 100)
+	e.ended(t, "s1", p, 100)
 	if _, err := IngestUsage(e.st, 20, now); err != nil {
 		t.Fatal(err)
 	}
 	e.touch(t, "s1", "", model.PostTool, 6000)
-	e.touch(t, "s1", "", model.SessionEnd, 7000)
+	e.ended(t, "s1", "", 7000)
 	f, err := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		t.Fatal(err)
@@ -197,7 +204,7 @@ func TestIngestPermissionDenied(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(p, 0o600) })
-	e.touch(t, "s1", p, model.SessionEnd, 100)
+	e.ended(t, "s1", p, 100)
 	n, err := IngestUsage(e.st, 20, now)
 	if err == nil || n != 0 {
 		t.Fatalf("n=%d err=%v, want error and 0", n, err)
@@ -210,7 +217,7 @@ func TestIngestPermissionDenied(t *testing.T) {
 func TestIngestAllMalformedUnparsed(t *testing.T) {
 	e := newEnv(t)
 	p := e.write(t, "t.jsonl", "not json\n{broken\n")
-	e.touch(t, "s1", p, model.SessionEnd, 100)
+	e.ended(t, "s1", p, 100)
 	if _, err := IngestUsage(e.st, 20, now); err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +230,7 @@ func TestIngestMostlyGoodWithMalformedOK(t *testing.T) {
 	e := newEnv(t)
 	good := `{"type":"assistant","timestamp":"2026-01-01T00:00:00Z","message":{"id":"%s","usage":{"output_tokens":5}}}` + "\n"
 	p := e.write(t, "t.jsonl", fmt.Sprintf(good, "a")+fmt.Sprintf(good, "b")+fmt.Sprintf(good, "c")+"not json\n")
-	e.touch(t, "s1", p, model.SessionEnd, 100)
+	e.ended(t, "s1", p, 100)
 	if _, err := IngestUsage(e.st, 20, now); err != nil {
 		t.Fatal(err)
 	}
