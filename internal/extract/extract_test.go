@@ -121,7 +121,7 @@ func TestCommandVariantsShareOneMemory(t *testing.T) {
 		keys[m.Key] = m.Text
 	}
 	want := map[string]string{
-		"go test":        "tests: go vet ./internal/b && go test ./internal/b 2>&1 | tail",
+		"go test":        "tests: go vet ./internal/b && go test ./internal/b",
 		"npm run dev":    "run: npm run dev",
 		"npm run worker": "run: npm run worker",
 	}
@@ -158,6 +158,26 @@ func TestClassifyCommandReadsProgramsNotArguments(t *testing.T) {
 		if got := extract.ClassifyCommand(cmd); got != want {
 			t.Errorf("ClassifyCommand(%q) = %q, want %q", cmd, got, want)
 		}
+	}
+}
+
+func TestCoreCommand(t *testing.T) {
+	cases := map[string]string{
+		"go test ./...": "go test ./...",
+		"cd /p; go test ./internal/store/ -run 'A|B' 2>&1 | tail -5; go vet ./internal/store/ 2>&1 | tail -3": "go test ./internal/store/ && go vet ./internal/store/",
+		"cd /p/apps/web && pnpm exec tsc --noEmit -p . 2>&1 | tail -20":                                    "cd apps/web && pnpm exec tsc --noEmit -p .",
+		"cd /elsewhere && npm run -s build >/dev/null":                                                     "npm run -s build",
+		`CGO_ENABLED=0 go test -run=TestX -count=1 ./x && echo "go test ok"`:                               "CGO_ENABLED=0 go test -count=1 ./x",
+		`pnpm vitest run lib/auth -t "logs in" 2>&1 | rg '^ FAIL'`:                                         "pnpm vitest run lib/auth",
+		"rg -n test src":                                                                                   "",
+	}
+	for cmd, want := range cases {
+		if got := extract.CoreCommand(cmd, "/p"); got != want {
+			t.Errorf("CoreCommand(%q) = %q, want %q", cmd, got, want)
+		}
+	}
+	if got := extract.CommandKey("cd /p && go test ./x 2>&1 | tail"); got != "go test" {
+		t.Errorf("CommandKey = %q, want go test", got)
 	}
 }
 

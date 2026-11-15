@@ -233,6 +233,17 @@ func TestLabelOneWordCommandNeverHits(t *testing.T) {
 	checkLabel(t, got[1], -1, "closed_unlabeled", 0)
 }
 
+func TestLabelCommandKeyHits(t *testing.T) {
+	rows := []store.ScoreOutcome{
+		liftRow(t, 1, "m1", "go test", "tests: go test ./..."),
+		liftRow(t, 2, "m2", "go vet", "lint: go vet ./..."),
+	}
+	events := []model.Event{labelPrompt(100, "p1"), labelCmd(200, "cd /p && go test ./internal/x -run Foo 2>&1 | tail -5", 0)}
+	got := labelOK(t, rows, events, noForget)
+	checkLabel(t, got[0], 1, "full_command", 1)
+	checkLabel(t, got[1], 0, "sibling", 1)
+}
+
 func labelOK(t *testing.T, rows []store.ScoreOutcome, events []model.Event, forget ForgetFunc) []Labeled {
 	t.Helper()
 	got, ok, err := LabelGroup(rows, events, labelEnded, forget, DefaultWeights())

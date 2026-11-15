@@ -1,9 +1,11 @@
 package recall
 
 import (
+	"cmp"
 	"sort"
 	"strings"
 
+	"github.com/a6n-ai/inscribe/internal/extract"
 	"github.com/a6n-ai/inscribe/internal/store"
 	"github.com/a6n-ai/inscribe/internal/text"
 	"github.com/a6n-ai/inscribe/model"
@@ -97,11 +99,15 @@ func LabelGroup(rows []store.ScoreOutcome, events []model.Event, ended int64, fo
 	}
 	var cmdOK, cmdFailed bool
 	var words []string
+	ranKey := ""
 	if closing != nil {
 		cmdOK, cmdFailed = succeeded(*closing), failed(*closing)
-		words = ContentWords(payloadString(*closing, "command"))
+		raw := payloadString(*closing, "command")
+		words = ContentWords(cmp.Or(extract.CoreCommand(raw, closing.Project), raw))
+		ranKey = extract.CommandKey(raw)
 	}
-	canHit := len(words) >= 2
+	// "go test ./..." has one content word, so the command key also counts.
+	canHit := len(words) >= 2 || ranKey != ""
 
 	n := len(rows)
 	out := make([]Labeled, n)
@@ -153,6 +159,13 @@ func LabelGroup(rows []store.ScoreOutcome, events []model.Event, ended int64, fo
 	if canHit {
 		for i, r := range rows {
 			if !active(i) || forgotten[i] || corrected[i] {
+				continue
+			}
+			if ranKey != "" && r.ShownKey == ranKey {
+				hitCand[i] = true
+				continue
+			}
+			if len(words) < 2 {
 				continue
 			}
 			seen := map[string]bool{}

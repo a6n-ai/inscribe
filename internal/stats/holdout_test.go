@@ -193,6 +193,7 @@ func TestWouldBeHit(t *testing.T) {
 		{[]string{"a an of"}, "k", "a an of", false},
 		{[]string{""}, "k", "go test", false},
 		{nil, "k", "go test", false},
+		{[]string{"cd /p && go test ./x 2>&1 | tail"}, "go test", "tests: go test ./...", true},
 	}
 	for _, c := range cases {
 		if got := WouldBeHit(c.cmds, c.key, c.line); got != c.want {

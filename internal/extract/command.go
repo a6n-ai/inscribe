@@ -1,9 +1,11 @@
 package extract
 
 import (
+	"cmp"
 	"context"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/a6n-ai/inscribe/internal/config"
@@ -74,6 +76,77 @@ func ClassifyCommand(cmd string) string {
 	return class
 }
 
+// CommandKey returns the dedupe key a command memory for cmd is stored under,
+// or "" when cmd is not worth remembering.
+func CommandKey(cmd string) string {
+	_, key := classify(NormalizeCommand(cmd))
+	return key
+}
+
+var (
+	redirect   = regexp.MustCompile(`\d*>&\d+|&?\d*>>?\s*\S+|<\s*\S+`)
+	quoteToken = regexp.MustCompile("\x00(\\d+)\x00")
+	// filterFlags pick one test by name; the remembered command runs them all.
+	filterFlags = map[string]bool{"-run": true, "-k": true, "-t": true, "--testNamePattern": true, "--grep": true}
+)
+
+// CoreCommand reduces a shell line to the segments that run a class program,
+// without redirections or test-name filters, so a one-off
+// `cd <project> && go test ./x -run Foo 2>&1 | tail -5` is remembered as
+// `go test ./x`. A cd into a folder of project is kept as `cd <rel> && `.
+// It returns "" when no segment runs a class program.
+func CoreCommand(cmd, project string) string {
+	var quotes []string
+	masked := quoted.ReplaceAllStringFunc(cmd, func(q string) string {
+		quotes = append(quotes, q)
+		return "\x00" + strconv.Itoa(len(quotes)-1) + "\x00"
+	})
+	dir := ""
+	var keep []string
+	for _, seg := range segmentSep.Split(redirect.ReplaceAllString(masked, ""), -1) {
+		f := strings.Fields(seg)
+		i := 0
+		for i < len(f) && envAssign.MatchString(f[i]) {
+			i++
+		}
+		if i == len(f) {
+			continue
+		}
+		if f[i] == "cd" && i+1 < len(f) && project != "" {
+			if rel, err := filepath.Rel(project, f[i+1]); err == nil && rel != "." && !strings.HasPrefix(rel, "..") && filepath.IsAbs(f[i+1]) {
+				dir = rel
+			}
+			continue
+		}
+		if !classPrograms[filepath.Base(f[i])] {
+			continue
+		}
+		var args []string
+		for j := 0; j < len(f); j++ {
+			name, _, _ := strings.Cut(f[j], "=")
+			if j > i && filterFlags[name] {
+				if name == f[j] {
+					j++
+				}
+				continue
+			}
+			args = append(args, f[j])
+		}
+		keep = append(keep, strings.Join(args, " "))
+	}
+	if len(keep) == 0 {
+		return ""
+	}
+	out := strings.Join(keep, " && ")
+	if dir != "" {
+		out = "cd " + dir + " && " + out
+	}
+	return quoteToken.ReplaceAllStringFunc(out, func(tok string) string {
+		n, _ := strconv.Atoi(quoteToken.FindStringSubmatch(tok)[1])
+		return quotes[n]
+	})
+}
+
 // classify returns the command's class and its dedupe key: the program plus the
 // words that matched, so "go test ./a" and "go vet ./b && go test ./c" share "go test".
 func classify(cmd string) (class, key string) {
@@ -115,7 +188,7 @@ func (commandX) Extract(_ context.Context, e *model.Event, tx *store.Tx, _ confi
 	if class == "" {
 		return nil
 	}
-	m := projectMemory(e, model.Command, key, classLabel[class]+": "+cmd, map[string]any{"class": class}, model.Active)
+	m := projectMemory(e, model.Command, key, classLabel[class]+": "+cmp.Or(CoreCommand(cmd, e.Project), cmd), map[string]any{"class": class}, model.Active)
 	_, err := tx.UpsertMemory(m, nil, e.ID)
 	return err
 }

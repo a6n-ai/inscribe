@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"slices"
 
+	"github.com/a6n-ai/inscribe/internal/extract"
 	"github.com/a6n-ai/inscribe/internal/recall"
 	"github.com/a6n-ai/inscribe/internal/store"
 	"github.com/a6n-ai/inscribe/internal/text"
@@ -49,6 +50,9 @@ func WouldBeHit(commands []string, key, line string) bool {
 		have[t] = true
 	}
 	for _, c := range commands {
+		if k := extract.CommandKey(c); k != "" && k == key {
+			return true
+		}
 		words := recall.ContentWords(c)
 		if len(words) > 0 && !slices.ContainsFunc(words, func(w string) bool { return !have[w] }) {
 			return true
