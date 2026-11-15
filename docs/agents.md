@@ -6,8 +6,11 @@ hook payloads. This page records what Inscribe relies on and how it was checked.
 ## Claude Code
 
 - Settings: `~/.claude/settings.json`. Verified live against Claude Code.
-- Hook events: SessionStart, UserPromptSubmit, PostToolUse, PostToolUseFailure,
-  Stop, SessionEnd. Inscribe installs no PreToolUse hook.
+- Hook events: SessionStart, SubagentStart, UserPromptSubmit, PostToolUse,
+  PostToolUseFailure, Stop, SessionEnd. Inscribe installs no PreToolUse hook.
+- Subagents: SubagentStart carries no task text, so a subagent gets the
+  session-start memories, without recent sessions. Tool events fired inside a
+  subagent keep its `agent_type` in the payload.
 - Consolidation runs here only: `claude -p` with tools disabled.
 
 ## Codex

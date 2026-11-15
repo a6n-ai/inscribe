@@ -367,7 +367,7 @@ func size(b int64) string {
 	return fmt.Sprintf("%.1f MB", float64(b)/1e6)
 }
 
-var hookOrder = []string{"SessionStart", "UserPromptSubmit", "PostToolUseFailure", "feedback_ask"}
+var hookOrder = []string{"SessionStart", "SubagentStart", "UserPromptSubmit", "PostToolUseFailure", "feedback_ask"}
 var reasonOrder = []string{"forgotten", "corrected", "failed", "agent", "review", "agent_wrong", "review_wrong"}
 
 func sortedKeys(m map[string]int) []string {

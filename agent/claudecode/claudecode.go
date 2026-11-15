@@ -23,6 +23,7 @@ var eventKinds = map[string]model.EventKind{
 	"PostToolUseFailure": model.PostTool,
 	"Stop":               model.TurnEnd,
 	"SessionEnd":         model.SessionEnd,
+	"SubagentStart":      model.SubagentStart,
 }
 
 // toolFields maps Claude Code tool names to Inscribe's canonical tool name and the
@@ -50,6 +51,8 @@ type hookPayload struct {
 	ToolName       string         `json:"tool_name"`
 	ToolInput      map[string]any `json:"tool_input"`
 	Error          string         `json:"error"`
+	// AgentType is set when the hook fires inside a subagent.
+	AgentType string `json:"agent_type"`
 }
 
 func (a *Adapter) Name() string { return name }
@@ -72,6 +75,9 @@ func (a *Adapter) Parse(event string, stdin []byte) (model.Event, error) {
 		e.PromptText = p.Prompt
 	case model.PostTool:
 		e.Tool, e.Payload = NormalizeTool(p.ToolName, p.ToolInput, event == "PostToolUseFailure", p.Error)
+	}
+	if p.AgentType != "" {
+		e.Payload["agent_type"] = p.AgentType
 	}
 	return e, nil
 }
@@ -117,7 +123,7 @@ func shellPayload(input map[string]any, failed bool, errText string) map[string]
 
 func (a *Adapter) Reply(event string, lines []recall.Line) []byte {
 	switch event {
-	case "SessionStart", "UserPromptSubmit", "PostToolUse", "PostToolUseFailure":
+	case "SessionStart", "SubagentStart", "UserPromptSubmit", "PostToolUse", "PostToolUseFailure":
 		return agent.ContextStatusJSON(event, lines, status(event, lines))
 	}
 	return nil
@@ -148,6 +154,8 @@ func status(event string, lines []recall.Line) string {
 		return fmt.Sprintf("inscribe: loaded %d memories, %d recent sessions%s", mems, recent, summary)
 	case event == "UserPromptSubmit":
 		return fmt.Sprintf("inscribe: recalled %d memories for this prompt", mems)
+	case event == "SubagentStart":
+		return ""
 	case mems == 0:
 		return ""
 	}

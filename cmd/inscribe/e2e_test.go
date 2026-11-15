@@ -144,6 +144,18 @@ func TestCUJ2SessionStartRecall(t *testing.T) {
 	}
 }
 
+func TestSubagentStartRecall(t *testing.T) {
+	home, proj := t.TempDir(), t.TempDir()
+	for range 3 {
+		hookOK(t, home, bashPayload("PostToolUse", "s1", proj, "go test ./...", ""), "PostToolUse")
+	}
+	in := map[string]any{"session_id": "s1", "cwd": proj, "hook_event_name": "SubagentStart", "agent_id": "a1", "agent_type": "Explore"}
+	ctx := additionalContext(t, hookOK(t, home, in, "SubagentStart"))
+	if !strings.Contains(ctx, "[command] tests: go test ./...") || strings.Contains(ctx, "recent") {
+		t.Fatalf("additionalContext = %q", ctx)
+	}
+}
+
 func TestCUJ3KnownError(t *testing.T) {
 	home, proj := t.TempDir(), t.TempDir()
 	file := filepath.Join(proj, "auth.ts")
@@ -724,8 +736,8 @@ func TestSetupYesTwiceIdempotent(t *testing.T) {
 	if first != second {
 		t.Errorf("second setup changed settings:\n%s\n---\n%s", first, second)
 	}
-	if n := strings.Count(second, "hook --agent claude-code"); n != 6 {
-		t.Errorf("inscribe hooks = %d, want 6", n)
+	if n := strings.Count(second, "hook --agent claude-code"); n != 7 {
+		t.Errorf("inscribe hooks = %d, want 7", n)
 	}
 }
 

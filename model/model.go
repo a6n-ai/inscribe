@@ -5,12 +5,14 @@ package model
 type EventKind string
 
 const (
-	SessionStart  EventKind = "session_start"
-	Prompt        EventKind = "prompt"
-	PreTool       EventKind = "pre_tool"
-	PostTool      EventKind = "post_tool"
-	TurnEnd       EventKind = "turn_end"
-	SessionEnd    EventKind = "session_end"
+	SessionStart EventKind = "session_start"
+	Prompt       EventKind = "prompt"
+	PreTool      EventKind = "pre_tool"
+	PostTool     EventKind = "post_tool"
+	TurnEnd      EventKind = "turn_end"
+	SessionEnd   EventKind = "session_end"
+	// SubagentStart is a subagent spawned inside a session; it has no prompt text.
+	SubagentStart EventKind = "subagent_start"
 	SkillLoaded   EventKind = "skill_loaded"
 	CommandResult EventKind = "command_result"
 	Correction    EventKind = "correction"

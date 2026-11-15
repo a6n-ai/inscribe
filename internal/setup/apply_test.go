@@ -150,8 +150,8 @@ func TestApplyTwiceIsIdempotent(t *testing.T) {
 	if n := countEvents(t); n != events || n == 0 {
 		t.Errorf("events after second run = %d, want %d (non-zero)", n, events)
 	}
-	if n := strings.Count(settingsOnce, "hook --agent claude-code"); n != 6 {
-		t.Errorf("inscribe hooks = %d, want 6", n)
+	if n := strings.Count(settingsOnce, "hook --agent claude-code"); n != 7 {
+		t.Errorf("inscribe hooks = %d, want 7", n)
 	}
 	adds := 0
 	for _, c := range f.calls {

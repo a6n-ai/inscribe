@@ -39,6 +39,8 @@ func TestParseGolden(t *testing.T) {
 		{"PostToolUse_Skill.json", "PostToolUse", model.PostTool, "skill", map[string]any{"skill": "superpowers:brainstorming"}, ""},
 		{"Stop.json", "Stop", model.TurnEnd, "", map[string]any{}, ""},
 		{"SessionEnd.json", "SessionEnd", model.SessionEnd, "", map[string]any{}, ""},
+		{"SubagentStart.json", "SubagentStart", model.SubagentStart, "", map[string]any{"agent_type": "Explore"}, ""},
+		{"PostToolUse_Subagent.json", "PostToolUse", model.PostTool, "shell", map[string]any{"command": "go test ./...", "exit_code": 0, "agent_type": "Explore"}, ""},
 	}
 	for _, c := range cases {
 		e, err := a.Parse(c.event, fixture(t, c.file))
@@ -86,6 +88,13 @@ func TestReplyGolden(t *testing.T) {
 	}
 	if got := a.Reply("Stop", lines); len(got) != 0 {
 		t.Fatalf("Stop reply = %q, want nothing", got)
+	}
+	sub := string(a.Reply("SubagentStart", lines))
+	if !strings.Contains(sub, `"hookEventName":"SubagentStart"`) || !strings.Contains(sub, "use rg not grep") || strings.Contains(sub, "systemMessage") {
+		t.Fatalf("SubagentStart reply = %s, want context and no status line", sub)
+	}
+	if got := a.Reply("SubagentStart", nil); len(got) != 0 {
+		t.Fatalf("empty SubagentStart reply = %q, want nothing", got)
 	}
 	want := `{"systemMessage":"inscribe: loaded 0 memories, 0 recent sessions"}`
 	if got := string(a.Reply("SessionStart", nil)); got != want {

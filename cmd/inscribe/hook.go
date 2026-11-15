@@ -165,9 +165,10 @@ func logDroppedInjections(h *inscribe.Inscribe) {
 }
 
 var injectionHooks = map[model.EventKind]string{
-	model.SessionStart: "SessionStart",
-	model.Prompt:       "UserPromptSubmit",
-	model.PostTool:     "PostToolUseFailure",
+	model.SessionStart:  "SessionStart",
+	model.SubagentStart: "SubagentStart",
+	model.Prompt:        "UserPromptSubmit",
+	model.PostTool:      "PostToolUseFailure",
 }
 
 // askEvents are the Claude Code events whose reply can carry additionalContext.
@@ -363,7 +364,7 @@ func spawnStatsIngest(e inscribe.Event) error {
 // event names reach the same recall. ok is false when the event should inject nothing.
 func hookQuery(e inscribe.Event, scrub func(string) string) (inscribe.Query, bool) {
 	switch e.Kind {
-	case model.SessionStart:
+	case model.SessionStart, model.SubagentStart:
 		return inscribe.Query{Project: e.Project, Mode: recall.SessionStart}, true
 	case model.Prompt:
 		return inscribe.Query{Project: e.Project, Text: e.PromptText, Agent: e.Agent, Session: e.Session, PromptDigest: e.Digest, Mode: recall.Prompt}, true

@@ -165,11 +165,11 @@ func TestCoreCommand(t *testing.T) {
 	cases := map[string]string{
 		"go test ./...": "go test ./...",
 		"cd /p; go test ./internal/store/ -run 'A|B' 2>&1 | tail -5; go vet ./internal/store/ 2>&1 | tail -3": "go test ./internal/store/ && go vet ./internal/store/",
-		"cd /p/apps/web && pnpm exec tsc --noEmit -p . 2>&1 | tail -20":                                    "cd apps/web && pnpm exec tsc --noEmit -p .",
-		"cd /elsewhere && npm run -s build >/dev/null":                                                     "npm run -s build",
-		`CGO_ENABLED=0 go test -run=TestX -count=1 ./x && echo "go test ok"`:                               "CGO_ENABLED=0 go test -count=1 ./x",
-		`pnpm vitest run lib/auth -t "logs in" 2>&1 | rg '^ FAIL'`:                                         "pnpm vitest run lib/auth",
-		"rg -n test src":                                                                                   "",
+		"cd /p/apps/web && pnpm exec tsc --noEmit -p . 2>&1 | tail -20":                                       "cd apps/web && pnpm exec tsc --noEmit -p .",
+		"cd /elsewhere && npm run -s build >/dev/null":                                                        "npm run -s build",
+		`CGO_ENABLED=0 go test -run=TestX -count=1 ./x && echo "go test ok"`:                                  "CGO_ENABLED=0 go test -count=1 ./x",
+		`pnpm vitest run lib/auth -t "logs in" 2>&1 | rg '^ FAIL'`:                                            "pnpm vitest run lib/auth",
+		"rg -n test src": "",
 	}
 	for cmd, want := range cases {
 		if got := extract.CoreCommand(cmd, "/p"); got != want {

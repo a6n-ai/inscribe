@@ -5,7 +5,7 @@ import (
 	"github.com/a6n-ai/inscribe/agent/hookjson"
 )
 
-var installEvents = []string{"SessionStart", "UserPromptSubmit", "PostToolUse", "PostToolUseFailure", "Stop", "SessionEnd"}
+var installEvents = []string{"SessionStart", "SubagentStart", "UserPromptSubmit", "PostToolUse", "PostToolUseFailure", "Stop", "SessionEnd"}
 
 func (a *Adapter) Install(settingsPath, inscribeBin string) error {
 	entries := make([]hookjson.Entry, 0, len(installEvents))
