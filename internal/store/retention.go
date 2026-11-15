@@ -118,6 +118,20 @@ func (t *Tx) DeleteOldEvents(cutoff int64, limit int) (int64, error) {
 	return res.RowsAffected()
 }
 
+// DeleteStaleCandidates deletes candidate memories of type typ last seen before
+// cutoff, with their evidence links, so the events they cite can expire too.
+func (t *Tx) DeleteStaleCandidates(typ model.MemoryType, cutoff int64) (int64, error) {
+	const pick = `SELECT id FROM memories WHERE type = ? AND status = 'candidate' AND last_seen < ?`
+	if _, err := t.tx.Exec(`DELETE FROM memory_evidence WHERE memory_id IN (`+pick+`)`, string(typ), cutoff); err != nil {
+		return 0, err
+	}
+	res, err := t.tx.Exec(`DELETE FROM memories WHERE id IN (`+pick+`)`, string(typ), cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // CountEventsBefore returns how many events are older than cutoff.
 func (t *Tx) CountEventsBefore(cutoff int64) (int, error) {
 	var n int

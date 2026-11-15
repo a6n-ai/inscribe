@@ -293,3 +293,35 @@ func TestDryRunAnalyticsChangesNothing(t *testing.T) {
 		t.Errorf("analytics rows = %d after dry run, want 4", n)
 	}
 }
+
+func TestStaleCochangeCandidatesExpire(t *testing.T) {
+	f := newFixture(t)
+	old, fresh := now.Add(-40*day).UnixMilli(), now.Add(-2*day).UnixMilli()
+	mems := []*model.Memory{
+		{Type: model.Cochange, Key: "a|b", Status: model.Candidate, LastSeen: old},
+		{Type: model.Cochange, Key: "c|d", Status: model.Candidate, LastSeen: fresh},
+		{Type: model.Cochange, Key: "e|f", Status: model.Active, LastSeen: old},
+		{Type: model.Preference, Key: "p", Status: model.Candidate, LastSeen: old},
+	}
+	err := f.st.Write(context.Background(), func(tx *store.Tx) error {
+		for _, m := range mems {
+			m.ScopeKind, m.Scope, m.Text, m.Confidence, m.FirstSeen = model.ProjectScope, "/p", "t", 0.5, m.LastSeen
+			if _, err := tx.UpsertMemory(m, nil, 0); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep := f.apply(f.conf, false); rep.CandidatesExpired != 1 {
+		t.Fatalf("report = %+v, want 1 candidate expired", rep)
+	}
+	if n := f.count(`SELECT count(*) FROM memories WHERE key = 'a|b'`); n != 0 {
+		t.Error("stale co-change candidate kept")
+	}
+	if n := f.count(`SELECT count(*) FROM memories`); n != 3 {
+		t.Errorf("memories = %d, want 3", n)
+	}
+}

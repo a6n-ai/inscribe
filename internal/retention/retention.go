@@ -1,5 +1,6 @@
 // Package retention bounds stored data: it clears prompt text, samples it for
-// replay, and deletes old events that no active memory cites as evidence.
+// replay, expires co-change candidates that never reached their third turn, and
+// deletes old events that no active memory cites as evidence.
 package retention
 
 import (
@@ -11,12 +12,17 @@ import (
 
 	"github.com/a6n-ai/inscribe/internal/config"
 	"github.com/a6n-ai/inscribe/internal/store"
+	"github.com/a6n-ai/inscribe/model"
 )
 
 // Report counts what a prune changed, or would change in a dry run.
 type Report struct {
 	PromptTextsCleared, EventsDeleted, ReplayAdded, ReplayDropped, KeptAsEvidence, InjectionsDeleted, UsageTurnsDeleted int
+	CandidatesExpired                                                                                                   int
 }
+
+// candidateDays is how long a co-change pair may wait for its third turn.
+const candidateDays = 30
 
 const (
 	batchSize   = 5000
@@ -138,8 +144,13 @@ func pass(tx *store.Tx, cfg config.RetentionCfg, now time.Time, rep *Report) (in
 	if err != nil {
 		return 0, err
 	}
+	expired, err := tx.DeleteStaleCandidates(model.Cochange, now.Add(-days(candidateDays)).UnixMilli())
+	if err != nil {
+		return 0, err
+	}
+	rep.CandidatesExpired += int(expired)
 	deleted, err := deleteOld(tx, cfg, now, rep)
-	return cleared + dropped + deleted, err
+	return cleared + dropped + int(expired) + deleted, err
 }
 
 // clearPrompts copies expiring prompt text to replay (rolling, when sampling is
