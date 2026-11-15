@@ -75,7 +75,8 @@ func NewAskID() string {
 // Render is the text that asks the agent to answer about ms.
 func Render(askID string, ms []model.Memory) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "inscribe feedback %s: you were given these memories. Call the inscribe feedback tool with ask %q and, for each id, used (yes|partly|no), helpful (yes|no|wrong), and for used ones a short \"how\".", askID, askID)
+	// Asks go to Claude Code only, where MCP tools are deferred until ToolSearch loads them.
+	fmt.Fprintf(&sb, "inscribe feedback %s: you were given these memories. Before your next reply, call `mcp__inscribe__feedback` (load it with ToolSearch \"select:mcp__inscribe__feedback\" if needed) with ask %q and, for each id, used (yes|partly|no), helpful (yes|no|wrong), and for used ones a short \"how\". It takes one call and trains what Inscribe recalls.", askID, askID)
 	for _, m := range ms {
 		fmt.Fprintf(&sb, "\n- %s [%s] %s", m.ID, m.Type, CutRunes(m.Text, 90))
 	}
