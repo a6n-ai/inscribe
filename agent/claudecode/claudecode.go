@@ -53,11 +53,18 @@ type hookPayload struct {
 	ToolInput      map[string]any `json:"tool_input"`
 	Error          string         `json:"error"`
 	// AgentType is set when the hook fires inside a subagent.
-	AgentType    string `json:"agent_type"`
-	ToolResponse struct {
-		Stdout string `json:"stdout"`
-		Stderr string `json:"stderr"`
-	} `json:"tool_response"`
+	AgentType string `json:"agent_type"`
+	// ToolResponse is an object for Bash and may be an array or string for other tools.
+	ToolResponse json.RawMessage `json:"tool_response"`
+}
+
+// shellOutput returns a Bash tool_response's stdout and stderr, or "" when it has another shape.
+func shellOutput(raw json.RawMessage) string {
+	var r struct{ Stdout, Stderr string }
+	if json.Unmarshal(raw, &r) != nil {
+		return ""
+	}
+	return r.Stdout + "\n" + r.Stderr
 }
 
 func (a *Adapter) Name() string { return name }
@@ -82,7 +89,7 @@ func (a *Adapter) Parse(event string, stdin []byte) (model.Event, error) {
 		e.Tool, e.Payload = NormalizeTool(p.ToolName, p.ToolInput, event == "PostToolUseFailure", p.Error)
 		if e.Tool == "shell" && e.Payload["exit_code"] == 0 {
 			cmd, _ := e.Payload["command"].(string)
-			if line := extract.PipedFailure(cmd, p.ToolResponse.Stdout+"\n"+p.ToolResponse.Stderr); line != "" {
+			if line := extract.PipedFailure(cmd, shellOutput(p.ToolResponse)); line != "" {
 				e.Payload["exit_code"], e.Payload["error"] = 1, line
 			}
 		}
