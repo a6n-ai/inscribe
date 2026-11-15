@@ -39,6 +39,8 @@ func TestParseGolden(t *testing.T) {
 		{"PostToolUse_Skill.json", "PostToolUse", model.PostTool, "skill", map[string]any{"skill": "superpowers:brainstorming"}, ""},
 		{"Stop.json", "Stop", model.TurnEnd, "", map[string]any{}, ""},
 		{"SessionEnd.json", "SessionEnd", model.SessionEnd, "", map[string]any{}, ""},
+		{"PostToolUse_PipedFail.json", "PostToolUse", model.PostTool, "shell", map[string]any{"command": "go test ./... 2>&1 | tail -3", "exit_code": 1,
+			"error": "--- FAIL: TestLogin (0.00s)"}, ""},
 		{"SubagentStart.json", "SubagentStart", model.SubagentStart, "", map[string]any{"agent_type": "Explore"}, ""},
 		{"PostToolUse_Subagent.json", "PostToolUse", model.PostTool, "shell", map[string]any{"command": "go test ./...", "exit_code": 0, "agent_type": "Explore"}, ""},
 	}

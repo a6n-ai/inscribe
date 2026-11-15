@@ -10,6 +10,7 @@ import (
 
 	"github.com/a6n-ai/inscribe/agent"
 	"github.com/a6n-ai/inscribe/internal/capture"
+	"github.com/a6n-ai/inscribe/internal/extract"
 	"github.com/a6n-ai/inscribe/internal/recall"
 	"github.com/a6n-ai/inscribe/model"
 )
@@ -52,7 +53,11 @@ type hookPayload struct {
 	ToolInput      map[string]any `json:"tool_input"`
 	Error          string         `json:"error"`
 	// AgentType is set when the hook fires inside a subagent.
-	AgentType string `json:"agent_type"`
+	AgentType    string `json:"agent_type"`
+	ToolResponse struct {
+		Stdout string `json:"stdout"`
+		Stderr string `json:"stderr"`
+	} `json:"tool_response"`
 }
 
 func (a *Adapter) Name() string { return name }
@@ -75,6 +80,12 @@ func (a *Adapter) Parse(event string, stdin []byte) (model.Event, error) {
 		e.PromptText = p.Prompt
 	case model.PostTool:
 		e.Tool, e.Payload = NormalizeTool(p.ToolName, p.ToolInput, event == "PostToolUseFailure", p.Error)
+		if e.Tool == "shell" && e.Payload["exit_code"] == 0 {
+			cmd, _ := e.Payload["command"].(string)
+			if line := extract.PipedFailure(cmd, p.ToolResponse.Stdout+"\n"+p.ToolResponse.Stderr); line != "" {
+				e.Payload["exit_code"], e.Payload["error"] = 1, line
+			}
+		}
 	}
 	if p.AgentType != "" {
 		e.Payload["agent_type"] = p.AgentType

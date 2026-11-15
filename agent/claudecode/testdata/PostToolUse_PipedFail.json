@@ -1,0 +1,1 @@
+{"session_id":"sess-1","cwd":"/tmp/inscribe-fixture-proj","hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"go test ./... 2>&1 | tail -3"},"tool_response":{"stdout":"--- FAIL: TestLogin (0.00s)\nFAIL\tauth\t0.1s","stderr":""}}

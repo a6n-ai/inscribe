@@ -252,3 +252,22 @@ func TestNoteFromRemembered(t *testing.T) {
 		t.Fatalf("notes = %+v", ms)
 	}
 }
+
+func TestPipedFailure(t *testing.T) {
+	cases := []struct{ cmd, out, want string }{
+		{"go test ./... 2>&1 | tail -5", "--- FAIL: TestX (0.01s)\nFAIL\tpkg/x\t0.2s", "--- FAIL: TestX (0.01s)"},
+		{"pnpm vitest run 2>&1 | tail", " Test Files  1 failed | 4 passed (5)", "Test Files  1 failed | 4 passed (5)"},
+		{"pnpm tsc --noEmit -p . | head; echo done", "", ""},
+		{"pnpm build 2>&1 | tail", "src/a.ts(3,1): error TS2304: Cannot find name 'x'.", "src/a.ts(3,1): error TS2304: Cannot find name 'x'."},
+		{"go build ./... ; echo done", "./main.go:12:3: undefined: foo", "./main.go:12:3: undefined: foo"},
+		{"go test ./... | tail", "ok  \tpkg/x\t0.2s\n 0 failed", ""},
+		{"go test ./...", "--- FAIL: TestX", ""},
+		{"rg FAIL log | head", "FAIL here", ""},
+		{`git commit -m "fix | FAIL"`, "FAIL", ""},
+	}
+	for _, c := range cases {
+		if got := extract.PipedFailure(c.cmd, c.out); got != c.want {
+			t.Errorf("PipedFailure(%q) = %q, want %q", c.cmd, got, c.want)
+		}
+	}
+}

@@ -165,6 +165,25 @@ func classify(cmd string) (class, key string) {
 	return "", ""
 }
 
+// failureLine matches output lines that only a failed test or build prints.
+var failureLine = regexp.MustCompile(`(?m)^\s*(?:--- FAIL\b|FAIL\b|ERR_PNPM_\S+|npm ERR!).*$` +
+	`|(?m)^.*\b[1-9]\d* failed\b.*$` +
+	`|(?m)^.*\berror TS\d+:.*$` +
+	`|(?m)^\S+\.go:\d+:\d+: .*$`)
+
+// PipedFailure returns the first failure line in output when cmd is a test or
+// build run whose exit code came from a later pipe or ; segment (`go test ./... |
+// tail` exits 0 when tests fail). It returns "" otherwise.
+func PipedFailure(cmd, output string) string {
+	if c := ClassifyCommand(NormalizeCommand(cmd)); c != "test" && c != "build" {
+		return ""
+	}
+	if !strings.ContainsAny(quoted.ReplaceAllString(cmd, "Q"), "|;") {
+		return ""
+	}
+	return strings.TrimSpace(failureLine.FindString(output))
+}
+
 // maxCommandLen drops pasted scripts: a real entrypoint command is short.
 const maxCommandLen = 200
 
