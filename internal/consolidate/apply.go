@@ -224,7 +224,9 @@ func (a applier) supersede(op Op) error {
 	return a.write("supersede", m, before)
 }
 
-// add upserts the memory and cites its evidence. An existing memory is updated, not replaced.
+// add upserts the memory and cites its evidence. An existing memory is updated,
+// not replaced, and keeps its status. A new one starts as a candidate, which
+// recall does not inject, until a later review promotes it.
 func (a applier) add(op Op) error {
 	existing, err := a.tx.MemoryByKey(model.MemoryType(op.Type), model.ScopeKind(op.ScopeKind), op.Scope, op.Key)
 	if err != nil {
@@ -238,7 +240,7 @@ func (a applier) add(op Op) error {
 	}
 	m, err := a.tx.UpsertMemory(&model.Memory{Type: model.MemoryType(op.Type), ScopeKind: model.ScopeKind(op.ScopeKind),
 		Scope: op.Scope, Key: op.Key, Body: op.Body, Text: op.Text, Confidence: addConfidence,
-		Status: model.Active, FirstSeen: a.now, LastSeen: a.now}, nil, 0)
+		Status: model.Candidate, FirstSeen: a.now, LastSeen: a.now}, nil, 0)
 	if err != nil {
 		return err
 	}

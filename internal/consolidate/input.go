@@ -67,6 +67,12 @@ func BuildInput(st *store.Store, session string, fromEventID int64, budgetTokens
 	if in.Unrated, err = st.UnratedMemories(session); err != nil {
 		return Input{}, err
 	}
+	// Command and co-change lines are judged by whether the agent ran the command
+	// or touched the files, which a review of the same events can only echo back;
+	// score train labels them from the session instead.
+	in.Unrated = slices.DeleteFunc(in.Unrated, func(m model.Memory) bool {
+		return m.Type == model.Command || m.Type == model.Cochange
+	})
 	in.Unrated = newest(in.Unrated, maxUnrated)
 	if err := addShowings(st, &in, scrub); err != nil {
 		return Input{}, err

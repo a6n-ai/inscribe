@@ -156,7 +156,7 @@ func TestValidOpsApplyWithAudit(t *testing.T) {
 		t.Errorf("rejected memory status = %s", got.Status)
 	}
 	added, err := e.st.ListMemories(store.ListFilter{Key: "prefer-small-commits"})
-	if err != nil || len(added) != 1 || added[0].Status != model.Active {
+	if err != nil || len(added) != 1 || added[0].Status != model.Candidate {
 		t.Fatalf("added memory = %+v (%v)", added, err)
 	}
 	audit, err := e.st.AuditRows(rep.RunID)

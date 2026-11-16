@@ -13,9 +13,15 @@ const PromptHeader = "You review one coding session's memories for a developer's
 const instructions = PromptHeader + `
 Propose changes that make the memories accurate, concise, and useful. Do only these jobs:
 1. merge: combine duplicate memories of the same type into one (keep one id, drop the others).
-2. promote: make a candidate preference active, optionally narrowing its scope.
+2. promote: make a candidate preference or decision active, optionally narrowing its scope, when this
+   session's events show it again or rely on it. Promote an existing candidate instead of adding it again.
 3. reject: forget a memory that is wrong or no longer true.
 4. add: record a decision the session's events clearly show. Cite the event ids that show it.
+   It starts as a candidate and is shown to future sessions only once a later review promotes it.
+   Add only what a future session would get wrong without it: a choice and its reason, a constraint,
+   a gotcha, a convention. Do not add what the agent can read from the code, config, package files, or
+   git history (file moves, renames, version pins, what a function does), one-off task status, or a
+   restatement of an instruction file.
 5. supersede or stale: replace an outdated memory with a newer one, or mark it stale.
 6. rate: for each memory in "unrated" and each prompt ref in its "shown" list, say whether the agent
    used it for that prompt and whether it helped that prompt. Judge each prompt on its own: a memory
