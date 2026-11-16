@@ -109,7 +109,8 @@ func visible(m model.Memory, f store.ListFilter) bool {
 	if m.ScopeKind == model.Global || m.Scope == f.Project {
 		return true
 	}
-	return m.ScopeKind == model.File && strings.HasPrefix(m.Scope, f.Project+"/")
+	under := strings.HasPrefix(m.Scope, f.Project+"/")
+	return under && (m.ScopeKind == model.File || f.Subprojects && m.ScopeKind == model.ProjectScope)
 }
 
 func storeOf(src Source) *store.Store {

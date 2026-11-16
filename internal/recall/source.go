@@ -79,6 +79,9 @@ func (s IndexSource) anyOf(f store.ListFilter) [][]string {
 	}
 	if f.Project != "" {
 		g := append([]string{"project:" + f.Project, "scope:global"}, s.Idx.TagsWithPrefix("file:"+f.Project+"/")...)
+		if f.Subprojects {
+			g = append(g, s.Idx.TagsWithPrefix("project:"+f.Project+"/")...)
+		}
 		groups = append(groups, g)
 	}
 	return groups

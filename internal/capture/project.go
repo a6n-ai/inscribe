@@ -4,23 +4,23 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/a6n-ai/inscribe/internal/gitroot"
 )
 
 // ResolveProject returns the git root containing cwd (symlinks resolved), or
-// the resolved cwd when it is not inside a repository. It never runs git.
+// the resolved cwd when it is not inside a repository. A linked worktree
+// resolves to its main repository, so both share one project. It never runs git.
 func ResolveProject(cwd string) string {
 	dir, err := filepath.EvalSymlinks(cwd)
 	if err != nil {
 		dir = filepath.Clean(cwd)
 	}
-	for d := dir; ; d = filepath.Dir(d) {
-		if _, err := os.Lstat(filepath.Join(d, ".git")); err == nil {
-			return d
-		}
-		if parent := filepath.Dir(d); parent == d {
-			return dir
-		}
+	root, ok := gitroot.Checkout(dir)
+	if !ok {
+		return dir
 	}
+	return gitroot.Main(root)
 }
 
 // normalizeExcludes expands a leading ~/ and resolves symlinks, so entries

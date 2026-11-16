@@ -54,6 +54,9 @@ type ListFilter struct {
 	Statuses []model.Status
 	Key      string // exact key match when set
 	Limit    int    // 0 means no limit
+	// Subprojects also matches project memories of repositories under
+	// Project; set when Project is a workspace folder that is not a repo.
+	Subprojects bool
 }
 
 // Open opens or creates the database at path. The parent directory is created
@@ -389,6 +392,10 @@ func filterSQL(a string, f ListFilter) (string, []any) {
 	if f.Project != "" {
 		conds = append(conds, "("+a+".scope_kind = 'global' OR "+a+".scope = ? OR ("+a+".scope_kind = 'file' AND "+a+".scope LIKE ? ESCAPE '\\'))")
 		args = append(args, f.Project, escapeLike(f.Project)+"/%")
+		if f.Subprojects {
+			conds[len(conds)-1] = "(" + conds[len(conds)-1] + " OR (" + a + ".scope_kind = 'project' AND " + a + ".scope LIKE ? ESCAPE '\\'))"
+			args = append(args, escapeLike(f.Project)+"/%")
+		}
 	}
 	if len(conds) == 0 {
 		return "", nil

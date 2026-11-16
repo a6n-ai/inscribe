@@ -685,11 +685,12 @@ func TestMCPFeedbackRepeatedWrongAcrossAsks(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Each wrong answer lowers the memory's recall score, so it stops being
-	// injected after a few; the asks are made first and answered after.
+	// injected after a few; the asks are made first and answered after. Each
+	// round is its own session, since recall does not repeat a line within one.
 	now := time.Now()
 	var asks []string
 	for i := range 5 {
-		asks = append(asks, askRound(t, h, proj, "s1", fmt.Sprintf("d%d", i), now.Add(time.Duration(i)*11*time.Minute)))
+		asks = append(asks, askRound(t, h, proj, fmt.Sprintf("s%d", i), fmt.Sprintf("d%d", i), now.Add(time.Duration(i)*11*time.Minute)))
 	}
 	for i, askID := range asks {
 		args := feedbackItems(

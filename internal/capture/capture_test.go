@@ -149,6 +149,46 @@ func TestCaptureScrubsBeforeWrite(t *testing.T) {
 	}
 }
 
+func TestResolveProjectWorktree(t *testing.T) {
+	base, _ := filepath.EvalSymlinks(t.TempDir())
+	main := filepath.Join(base, "repo")
+	gitdir := filepath.Join(main, ".git", "worktrees", "wt")
+	mustMkdir(t, gitdir)
+	mustWrite(t, filepath.Join(gitdir, "commondir"), "../..\n")
+	wt := filepath.Join(base, "repo-wt")
+	mustMkdir(t, filepath.Join(wt, "sub"))
+	mustWrite(t, filepath.Join(wt, ".git"), "gitdir: "+gitdir+"\n")
+	for _, cwd := range []string{wt, filepath.Join(wt, "sub")} {
+		if got := ResolveProject(cwd); got != main {
+			t.Errorf("ResolveProject(%s) = %s, want main repo %s", cwd, got, main)
+		}
+	}
+
+	// A submodule's .git file points at a gitdir with no commondir.
+	sm := filepath.Join(main, "vendor", "sm")
+	smGit := filepath.Join(main, ".git", "modules", "sm")
+	mustMkdir(t, sm)
+	mustMkdir(t, smGit)
+	mustWrite(t, filepath.Join(sm, ".git"), "gitdir: ../../.git/modules/sm\n")
+	if got := ResolveProject(sm); got != sm {
+		t.Errorf("submodule ResolveProject = %s, want %s", got, sm)
+	}
+}
+
+func mustMkdir(t *testing.T, p string) {
+	t.Helper()
+	if err := os.MkdirAll(p, 0o700); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustWrite(t *testing.T, p, s string) {
+	t.Helper()
+	if err := os.WriteFile(p, []byte(s), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestExcludedProjectNotCaptured(t *testing.T) {
 	p, _ := newPipeline(t)
 	p.Cfg.Exclude.Paths = []string{"/tmp/secret-proj"}

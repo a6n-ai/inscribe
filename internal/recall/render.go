@@ -6,6 +6,9 @@ func renderLine(l Line) string {
 	if l.Type == HoldoutType {
 		return ""
 	}
+	if l.Repo != "" {
+		return "[" + string(l.Type) + "] (" + l.Repo + ") " + l.Text
+	}
 	return "[" + string(l.Type) + "] " + l.Text
 }
 

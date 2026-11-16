@@ -226,3 +226,23 @@ func (s *Store) MemoriesTouching(project, token string, statuses []model.Status,
 	}
 	return out, rows.Err()
 }
+
+// SessionShownScores returns, per memory, the best score it was shown with on
+// an earlier prompt of session.
+func (s *Store) SessionShownScores(session string) (map[string]float64, error) {
+	rows, err := s.db.Query(`SELECT memory_id, max(score) FROM score_outcomes WHERE session = ? GROUP BY memory_id`, session)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]float64{}
+	for rows.Next() {
+		var id string
+		var score float64
+		if err := rows.Scan(&id, &score); err != nil {
+			return nil, err
+		}
+		out[id] = score
+	}
+	return out, rows.Err()
+}

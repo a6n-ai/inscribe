@@ -4,6 +4,8 @@ package recall
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -55,6 +57,7 @@ type Line struct {
 	Type     model.MemoryType
 	Text     string
 	Score    float64
+	Repo     string // in a workspace session, the repo under it that the memory is from
 }
 
 // Recall returns ranked lines for q, and marks them used. A nil src reads the store.
@@ -65,7 +68,7 @@ func Recall(ctx context.Context, st *store.Store, src Source, cfg config.RecallC
 	if src == nil {
 		src = StoreSource{st}
 	}
-	filter := store.ListFilter{Types: q.Types, Project: q.Project, Statuses: []model.Status{model.Active}}
+	filter := store.ListFilter{Types: q.Types, Project: q.Project, Statuses: []model.Status{model.Active}, Subprojects: isWorkspace(q.Project)}
 	var hits []hit
 	var err error
 	switch q.Mode {
@@ -90,6 +93,7 @@ func Recall(ctx context.Context, st *store.Store, src Source, cfg config.RecallC
 			hits, err = scoreWindows(ctx, src, filter, cfg, q, now, windows, facets, w)
 		}
 		hits = dropBelow(hits, cfg.PromptThreshold)
+		hits = dropRepeats(st, hits, q)
 		hits = trimHits(hits, q.Budget, promptLineCap(len(windows), cfg.PromptMaxLines))
 	case PostToolError:
 		if q.ErrorSignature == "" {
@@ -140,7 +144,7 @@ func scoreAll(src Source, f store.ListFilter, cfg config.RecallCfg, q Query, now
 				continue
 			}
 		}
-		hits = append(hits, hit{Line: Line{MemoryID: m.ID, Key: m.Key, Type: m.Type, Text: m.Text, Score: score}, feat: feat})
+		hits = append(hits, hit{Line: Line{MemoryID: m.ID, Key: m.Key, Type: m.Type, Text: m.Text, Score: score, Repo: repoOf(m, f)}, feat: feat})
 	}
 	sortHits(hits)
 	return hits, nil
@@ -306,4 +310,53 @@ func flatten(groups [][]string) []string {
 		out = append(out, g...)
 	}
 	return out
+}
+
+// isWorkspace reports whether project is a folder that is not itself a repo.
+// ResolveProject only returns such a path when no .git exists above it, so a
+// session there should see the memories of the repositories it contains.
+func isWorkspace(project string) bool {
+	if home, _ := os.UserHomeDir(); project == "" || project == home || project == filepath.Dir(project) {
+		return false // home or root would pull in every repo on the machine
+	}
+	_, err := os.Lstat(filepath.Join(project, ".git"))
+	return errors.Is(err, os.ErrNotExist)
+}
+
+// repeatLift is how much better a new prompt must match a line already shown
+// this session before it is shown again.
+const repeatLift = 1.15
+
+// dropRepeats removes lines this session already showed on an earlier prompt,
+// unless this prompt matches them clearly better than any earlier one did. A
+// line that missed for one prompt can still be right for another; a line
+// already in the context adds nothing for a prompt it matches no better.
+func dropRepeats(st *store.Store, hits []hit, q Query) []hit {
+	if q.Session == "" || q.Holdout || len(hits) == 0 {
+		return hits
+	}
+	shown, err := st.SessionShownScores(q.Session)
+	if err != nil {
+		return hits // a busy database must not cost the prompt its recall
+	}
+	out := hits[:0]
+	for _, h := range hits {
+		if prev, ok := shown[h.MemoryID]; !ok || h.Score >= prev*repeatLift {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// repoOf names the repository a project memory comes from, relative to a
+// workspace filter's folder, so lines from different repos can be told apart.
+func repoOf(m model.Memory, f store.ListFilter) string {
+	if !f.Subprojects || m.ScopeKind != model.ProjectScope || m.Scope == f.Project {
+		return ""
+	}
+	rel, err := filepath.Rel(f.Project, m.Scope)
+	if err != nil {
+		return ""
+	}
+	return rel
 }
