@@ -28,6 +28,9 @@ type validator struct {
 	unrated map[string]bool
 	events  map[int64]bool
 	touched map[string]bool
+	rated   map[string]bool     // memory id + prompt digest pairs already rated
+	shown   map[string][]string // unrated memory id -> prompt refs
+	digests map[string]string   // prompt ref -> digest
 	find    Finder
 }
 
@@ -38,10 +41,14 @@ type Finder func(model.MemoryType, model.ScopeKind, string, string) (*model.Memo
 // ids must come from the input, evidence must cite input events, no memory may
 // change twice in a run, add text is scrubbed again and kept short, and an add
 // may not take a key that a memory outside the input already holds. A rate op
-// may name only an unrated memory.
+// may name only an unrated memory and one prompt it was shown for, once per
+// prompt; it does not count as a change.
 func Validate(ops []Op, in Input, scrub func(string) string, find Finder) (valid []Op, rejected []Rejected) {
 	v := validator{project: in.Project, mems: map[string]model.Memory{}, unrated: map[string]bool{},
-		events: map[int64]bool{}, touched: map[string]bool{}, find: find}
+		events: map[int64]bool{}, touched: map[string]bool{}, rated: map[string]bool{}, shown: in.Shown, digests: map[string]string{}, find: find}
+	for _, p := range in.Prompts {
+		v.digests[p.Ref] = p.Digest
+	}
 	for _, m := range in.Memories {
 		v.mems[m.ID] = m
 	}
@@ -57,7 +64,9 @@ func Validate(ops []Op, in Input, scrub func(string) string, find Finder) (valid
 		if reason == "" {
 			reason = v.guard(op, touches)
 		}
-		if reason == "" {
+		if reason == "" && op.Op == "rate" {
+			reason = v.claimRate(op.ID, op.Prompt)
+		} else if reason == "" {
 			reason = v.claim(touches)
 		}
 		if reason != "" {
@@ -131,10 +140,24 @@ func within(path, project string) bool {
 	return project != "" && (path == project || strings.HasPrefix(path, project+"/"))
 }
 
-// rate needs an unrated memory and answers that feedback.Label accepts.
+// rate needs an unrated memory, one of the prompts it was shown for, and answers
+// that feedback.Label accepts. The prompt ref is replaced by its digest; a
+// memory shown for a single prompt may omit it.
 func (v *validator) rate(op *Op) ([]string, string) {
 	if !v.unrated[op.ID] {
 		return nil, "rate needs a memory the session has not rated: " + strconv.Quote(op.ID)
+	}
+	refs := v.shown[op.ID]
+	if op.Prompt == "" && len(refs) == 1 {
+		op.Prompt = refs[0]
+	}
+	if len(refs) > 0 {
+		if !slices.Contains(refs, op.Prompt) {
+			return nil, fmt.Sprintf("rate of %q needs a prompt from its shown list %v", op.ID, refs)
+		}
+		op.Prompt = v.digests[op.Prompt]
+	} else {
+		op.Prompt = "" // no prompt showings recorded: the rate covers the session's rows
 	}
 	if _, _, _, _, err := feedback.Label(op.review(), feedback.ReviewScale, "review"); err != nil {
 		return nil, err.Error()
@@ -228,6 +251,18 @@ func (v *validator) claim(ids []string) string {
 	for id := range seen {
 		v.touched[id] = true
 	}
+	return ""
+}
+
+// claimRate marks a memory rated for one prompt. A rate changes only the
+// penalty and the session's outcome rows, so it may share a memory with one
+// other op, but not with another rate of the same prompt.
+func (v *validator) claimRate(id, digest string) string {
+	key := id + "\x00" + digest
+	if v.rated[key] {
+		return fmt.Sprintf("memory %q rated twice for one prompt", id)
+	}
+	v.rated[key] = true
 	return ""
 }
 

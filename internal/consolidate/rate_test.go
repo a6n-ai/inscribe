@@ -163,6 +163,38 @@ func TestUndoRateRestores(t *testing.T) {
 	}
 }
 
+func TestRateAndSupersedeSameMemory(t *testing.T) {
+	e := newEnv(t)
+	ids := e.events(2)
+	old := e.memory("old", ids[0])
+	e.injected(old)
+	repl := e.memory("new", ids[1])
+	r := &fakeRunner{out: fmt.Sprintf(`{"ops":[{"op":"rate","id":%q,"used":"no","helpful":"wrong"},{"op":"supersede","old":%q,"new":%q},{"op":"rate","id":%q,"used":"yes","helpful":"yes"}]}`,
+		old, old, repl, old)}
+	rep := e.run(r, false)
+	if len(rep.Valid) != 2 || len(rep.Rejected) != 1 || rep.Rejected[0].Op.Op != "rate" {
+		t.Fatalf("valid = %d rejected = %v, want rate and supersede valid and the second rate rejected", len(rep.Valid), rep.Rejected)
+	}
+	m := e.get(old)
+	if m.Status != model.Superseded || m.SupersededBy != repl || math.Abs(m.Penalty-0.2) > 1e-9 {
+		t.Fatalf("memory = status %s by %q penalty %v, want superseded by %q with penalty 0.2", m.Status, m.SupersededBy, m.Penalty, repl)
+	}
+	if rows := e.outcomes(old); len(rows) != 1 || rows[0].Reason != "review_wrong" {
+		t.Fatalf("outcomes = %+v, want one review_wrong row", rows)
+	}
+	undo, err := consolidate.Undo(context.Background(), e.st, rep.RunID)
+	if err != nil || len(undo.Skipped) != 0 || undo.Restored != 2 {
+		t.Fatalf("undo = %+v (%v), want both rows restored", undo, err)
+	}
+	m = e.get(old)
+	if m.Status != model.Active || m.SupersededBy != "" || m.Penalty != 0 {
+		t.Errorf("after undo = status %s by %q penalty %v, want active, unsuperseded, no penalty", m.Status, m.SupersededBy, m.Penalty)
+	}
+	if rows := e.outcomes(old); len(rows) != 1 || rows[0].Label != nil {
+		t.Errorf("outcomes after undo = %+v, want the row reopened", rows)
+	}
+}
+
 // runnerFunc adapts a function to Runner, so a test can act while the review runs.
 type runnerFunc func(ctx context.Context, prompt string) (string, error)
 
@@ -172,7 +204,7 @@ func (f runnerFunc) Run(ctx context.Context, prompt string) (string, error) { re
 func (e *env) resolveRows(memoryID string) {
 	e.t.Helper()
 	err := e.st.Write(context.Background(), func(tx *store.Tx) error {
-		_, err := tx.ResolveSessionMemoryRows(session, memoryID, 1, "train", 1, 2)
+		_, err := tx.ResolveSessionMemoryRows(session, memoryID, "", 1, "train", 1, 2)
 		return err
 	})
 	if err != nil {

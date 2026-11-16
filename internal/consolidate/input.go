@@ -3,6 +3,7 @@ package consolidate
 import (
 	"cmp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/a6n-ai/inscribe/internal/store"
@@ -35,7 +36,9 @@ type Input struct {
 	Project    string
 	Events     []InputEvent
 	Memories   []model.Memory
-	Unrated    []model.Memory // injected this session and never rated; the only memories a rate op may name
+	Unrated    []model.Memory      // injected this session and never rated; the only memories a rate op may name
+	Prompts    []ShownPrompt       // the prompts unrated memories were shown for, as short refs
+	Shown      map[string][]string // unrated memory id -> refs of the prompts it is unrated for
 	MaxEventID int64
 }
 
@@ -65,6 +68,9 @@ func BuildInput(st *store.Store, session string, fromEventID int64, budgetTokens
 		return Input{}, err
 	}
 	in.Unrated = newest(in.Unrated, maxUnrated)
+	if err := addShowings(st, &in, scrub); err != nil {
+		return Input{}, err
+	}
 	trimToBudget(&in, budgetTokens)
 	return in, nil
 }
@@ -124,6 +130,9 @@ func trimToBudget(in *Input, budgetTokens int) {
 	for _, e := range in.Events {
 		total += eventSize(e)
 	}
+	for _, p := range in.Prompts {
+		total += len(p.Text) + len(p.Ref) + eventOverhead
+	}
 	for len(in.Events) > 0 && total > budgetTokens*4 {
 		total -= eventSize(in.Events[0])
 		in.Events = in.Events[1:]
@@ -144,4 +153,47 @@ func inScope(m model.Memory, project string) bool {
 		return within(m.Scope, project)
 	}
 	return false
+}
+
+// maxPromptChars keeps each shown prompt short in the review input.
+const maxPromptChars = 240
+
+// ShownPrompt is one prompt the review can rate a memory against.
+type ShownPrompt struct {
+	Ref    string // p1, p2, ... in the order the session sent them
+	Digest string
+	Text   string
+}
+
+// addShowings fills in which prompts each unrated memory was shown for, so a
+// rate can judge a memory per prompt: one that missed one prompt may have
+// helped another.
+func addShowings(st *store.Store, in *Input, scrub func(string) string) error {
+	shs, err := st.UnratedShowings(in.Session)
+	if err != nil {
+		return err
+	}
+	keep := map[string]bool{}
+	for _, m := range in.Unrated {
+		keep[m.ID] = true
+	}
+	refs := map[string]string{}
+	in.Shown = map[string][]string{}
+	for _, sh := range shs {
+		if !keep[sh.MemoryID] {
+			continue
+		}
+		ref, ok := refs[sh.Digest]
+		if !ok {
+			ref = "p" + strconv.Itoa(len(in.Prompts)+1)
+			refs[sh.Digest] = ref
+			text := scrub(sh.Prompt)
+			if len(text) > maxPromptChars {
+				text = text[:maxPromptChars] + "..."
+			}
+			in.Prompts = append(in.Prompts, ShownPrompt{Ref: ref, Digest: sh.Digest, Text: text})
+		}
+		in.Shown[sh.MemoryID] = append(in.Shown[sh.MemoryID], ref)
+	}
+	return nil
 }

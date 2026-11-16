@@ -34,6 +34,8 @@ type Op struct {
 	New       string         `json:"new,omitempty"`
 	Used      string         `json:"used,omitempty"`
 	Helpful   string         `json:"helpful,omitempty"`
+	// Prompt is the ref of the prompt a rate judges; validation replaces it with that prompt's digest.
+	Prompt string `json:"prompt,omitempty"`
 }
 
 // review is the answer a rate op records. The review has no how field, so a

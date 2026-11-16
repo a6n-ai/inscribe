@@ -62,7 +62,7 @@ func Apply(ctx context.Context, st *store.Store, session, runID string, valid []
 }
 
 func applyTx(tx *store.Tx, session, runID string, ops []Op, now int64) ([]Rejected, error) {
-	a := applier{tx: tx, session: session, runID: runID, now: now}
+	a := applier{tx: tx, session: session, runID: runID, now: now, penalized: map[string]bool{}}
 	var skipped []Rejected
 	for _, op := range ops {
 		reason, err := a.apply(op)
@@ -81,6 +81,8 @@ type applier struct {
 	session string
 	runID   string
 	now     int64
+	// penalized holds memories a rate in this run already called wrong.
+	penalized map[string]bool
 }
 
 // apply makes one op's change. A non-empty reason with a nil error means the op
@@ -115,7 +117,7 @@ func (a applier) recheck(op Op) (string, error) {
 			return "key was created after the review", nil
 		}
 	case "rate":
-		n, err := a.tx.UnresolvedSessionRows(a.session, op.ID)
+		n, err := a.tx.UnresolvedSessionRows(a.session, op.ID, op.Prompt)
 		if err != nil {
 			return "", err
 		}
@@ -248,7 +250,7 @@ func (a applier) add(op Op) error {
 	return a.write("add", m, before)
 }
 
-// rate labels the session's unrated outcomes of a memory and, when the agent
+// rate labels the session's unrated outcomes of a memory for one prompt and, when the agent
 // called it wrong, lowers its confidence through the penalty.
 func (a applier) rate(op Op) error {
 	m, err := a.get(op.ID)
@@ -263,10 +265,12 @@ func (a applier) rate(op Op) error {
 	if err != nil {
 		return err
 	}
-	if wrong {
+	if wrong && !a.penalized[m.ID] {
+		// Wrong is about the memory, not the prompt: one penalty per run however many prompts say so.
+		a.penalized[m.ID] = true
 		m.Penalty += feedback.Penalty(*m)
 	}
-	if _, err := a.tx.ResolveSessionMemoryRows(a.session, m.ID, label, reason, scale, a.now); err != nil {
+	if _, err := a.tx.ResolveSessionMemoryRows(a.session, m.ID, op.Prompt, label, reason, scale, a.now); err != nil {
 		return err
 	}
 	return a.write("rate", m, before)

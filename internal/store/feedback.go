@@ -31,23 +31,55 @@ func (s *Store) UnratedMemories(session string) ([]model.Memory, error) {
 	return out, rows.Err()
 }
 
+// Showing is one prompt of a session that showed a memory, still unrated.
+type Showing struct {
+	MemoryID string
+	Digest   string // prompt_digest of the outcome rows
+	Prompt   string // the prompt's text, or "" when its event is gone
+}
+
+// UnratedShowings returns, oldest first, each (memory, prompt) pair of a session
+// with an unresolved outcome no answered ask covers.
+func (s *Store) UnratedShowings(session string) ([]Showing, error) {
+	rows, err := s.db.Query(`SELECT memory_id, prompt_digest,
+		COALESCE((SELECT e.prompt_text FROM events e WHERE e.digest = score_outcomes.prompt_digest), '')
+		FROM score_outcomes WHERE session = ? AND resolved IS NULL AND `+unansweredRow+`
+		GROUP BY memory_id, prompt_digest ORDER BY min(ts), memory_id`, session)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Showing
+	for rows.Next() {
+		var sh Showing
+		if err := rows.Scan(&sh.MemoryID, &sh.Digest, &sh.Prompt); err != nil {
+			return nil, err
+		}
+		out = append(out, sh)
+	}
+	return out, rows.Err()
+}
+
 // ResolveSessionMemoryRows labels the unresolved outcomes of a memory in a session
-// that no answered ask covers. It returns how many rows it resolved.
-func (t *Tx) ResolveSessionMemoryRows(session, memoryID string, label int, reason string, scale float64, ts int64) (int64, error) {
+// that no answered ask covers, only those shown for the prompt with digest when
+// it is set: a memory can miss one prompt and help another. It returns how many
+// rows it resolved.
+func (t *Tx) ResolveSessionMemoryRows(session, memoryID, digest string, label int, reason string, scale float64, ts int64) (int64, error) {
 	res, err := t.tx.Exec(`UPDATE score_outcomes SET label = ?, reason = ?, scale = ?, resolved = ?
-		WHERE session = ? AND memory_id = ? AND resolved IS NULL AND `+unansweredRow,
-		label, reason, scale, ts, session, memoryID)
+		WHERE session = ? AND memory_id = ? AND (? = '' OR prompt_digest = ?) AND resolved IS NULL AND `+unansweredRow,
+		label, reason, scale, ts, session, memoryID, digest, digest)
 	if err != nil {
 		return 0, err
 	}
 	return res.RowsAffected()
 }
 
-// UnresolvedSessionRows counts a memory's unresolved outcomes in a session that no answered ask covers.
-func (t *Tx) UnresolvedSessionRows(session, memoryID string) (int64, error) {
+// UnresolvedSessionRows counts a memory's unresolved outcomes in a session that
+// no answered ask covers, only those for the prompt with digest when it is set.
+func (t *Tx) UnresolvedSessionRows(session, memoryID, digest string) (int64, error) {
 	var n int64
-	err := t.tx.QueryRow(`SELECT COUNT(*) FROM score_outcomes WHERE session = ? AND memory_id = ? AND resolved IS NULL AND `+unansweredRow,
-		session, memoryID).Scan(&n)
+	err := t.tx.QueryRow(`SELECT COUNT(*) FROM score_outcomes WHERE session = ? AND memory_id = ? AND (? = '' OR prompt_digest = ?) AND resolved IS NULL AND `+unansweredRow,
+		session, memoryID, digest, digest).Scan(&n)
 	return n, err
 }
 
