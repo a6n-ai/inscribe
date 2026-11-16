@@ -181,6 +181,35 @@ func TestCoreCommand(t *testing.T) {
 	}
 }
 
+func TestCoreCommandWorktreeCd(t *testing.T) {
+	base, _ := filepath.EvalSymlinks(t.TempDir())
+	main := filepath.Join(base, "repo")
+	gitdir := filepath.Join(main, ".git", "worktrees", "wt")
+	wt := filepath.Join(base, "repo-wt")
+	for _, d := range []string{gitdir, filepath.Join(wt, "apps", "web")} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(gitdir, "commondir"), []byte("../..\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: "+gitdir+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := extract.CoreCommand("cd "+filepath.Join(wt, "apps", "web")+" && pnpm exec tsc --noEmit 2>&1 | tail", main)
+	if want := "cd apps/web && pnpm exec tsc --noEmit"; got != want {
+		t.Errorf("worktree cd: got %q, want %q", got, want)
+	}
+	other := filepath.Join(base, "unrelated")
+	if err := os.MkdirAll(filepath.Join(other, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got := extract.CoreCommand("cd "+other+" && go test ./...", main); got != "go test ./..." {
+		t.Errorf("unrelated repo cd kept: %q", got)
+	}
+}
+
 func TestCommandSkipsHeredocAndLongCommands(t *testing.T) {
 	h := newHarness(t, config.Defaults(), extract.NewCommand())
 	h.shell("s1", "cat > /p/report.md <<'EOF'\nran the tests\nEOF", 0, "")

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/a6n-ai/inscribe/internal/config"
+	"github.com/a6n-ai/inscribe/internal/gitroot"
 	"github.com/a6n-ai/inscribe/internal/store"
 	"github.com/a6n-ai/inscribe/model"
 )
@@ -113,7 +114,7 @@ func CoreCommand(cmd, project string) string {
 			continue
 		}
 		if f[i] == "cd" && i+1 < len(f) && project != "" {
-			if rel, err := filepath.Rel(project, f[i+1]); err == nil && rel != "." && !strings.HasPrefix(rel, "..") && filepath.IsAbs(f[i+1]) {
+			if rel := projectRel(project, f[i+1]); rel != "" {
 				dir = rel
 			}
 			continue
@@ -145,6 +146,24 @@ func CoreCommand(cmd, project string) string {
 		n, _ := strconv.Atoi(quoteToken.FindStringSubmatch(tok)[1])
 		return quotes[n]
 	})
+}
+
+// projectRel returns target relative to the checkout it sits in, when that
+// checkout is project or one of project's linked worktrees, so a cd into
+// <worktree>/apps/web is remembered as `cd apps/web`. It returns "" otherwise.
+func projectRel(project, target string) string {
+	if !filepath.IsAbs(target) {
+		return ""
+	}
+	base := project
+	if root, ok := gitroot.Checkout(target); ok && root != project && gitroot.Main(root) == project {
+		base = root
+	}
+	rel, err := filepath.Rel(base, target)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return ""
+	}
+	return rel
 }
 
 // classify returns the command's class and its dedupe key: the program plus the
