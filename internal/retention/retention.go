@@ -18,11 +18,14 @@ import (
 // Report counts what a prune changed, or would change in a dry run.
 type Report struct {
 	PromptTextsCleared, EventsDeleted, ReplayAdded, ReplayDropped, KeptAsEvidence, InjectionsDeleted, UsageTurnsDeleted int
-	CandidatesExpired                                                                                                   int
+	CandidatesExpired, TrajectoryIndexed, TrajectoryDeleted, SessionsTrimmed                                            int
 }
 
 // candidateDays is how long a co-change pair may wait for its third turn.
-const candidateDays = 30
+const candidateDays = 14
+
+// sessionSummaries is how many session summaries each project keeps.
+const sessionSummaries = 200
 
 const (
 	batchSize   = 5000
@@ -133,12 +136,18 @@ func sweep(tx *store.Tx, cfg config.RetentionCfg, now time.Time, rep *Report) er
 
 // pass runs one batch of each step and returns how many rows it changed.
 func pass(tx *store.Tx, cfg config.RetentionCfg, now time.Time, rep *Report) (int, error) {
+	// Indexing is not pruning, so it runs in every mode.
+	indexed, err := tx.IndexTrajectory(batchSize)
+	if err != nil {
+		return 0, err
+	}
+	rep.TrajectoryIndexed += indexed
 	if cfg.Mode == modeKeepAll {
-		return 0, nil
+		return indexed, nil
 	}
 	cleared, err := clearPrompts(tx, cfg, now, rep)
 	if err != nil || cfg.Mode != modeRolling {
-		return cleared, err
+		return indexed + cleared, err
 	}
 	dropped, err := trimReplay(tx, cfg, now, rep)
 	if err != nil {
@@ -149,8 +158,18 @@ func pass(tx *store.Tx, cfg config.RetentionCfg, now time.Time, rep *Report) (in
 		return 0, err
 	}
 	rep.CandidatesExpired += int(expired)
+	trimmed, err := tx.TrimSessionSummaries(sessionSummaries)
+	if err != nil {
+		return 0, err
+	}
+	rep.SessionsTrimmed += int(trimmed)
+	traj, err := tx.DeleteTrajectoryBefore(now.Add(-days(cfg.TrajectoryDays)).UnixMilli(), batchSize)
+	if err != nil {
+		return 0, err
+	}
+	rep.TrajectoryDeleted += traj
 	deleted, err := deleteOld(tx, cfg, now, rep)
-	return cleared + dropped + int(expired) + deleted, err
+	return indexed + cleared + dropped + int(expired) + int(trimmed) + traj + deleted, err
 }
 
 // clearPrompts copies expiring prompt text to replay (rolling, when sampling is

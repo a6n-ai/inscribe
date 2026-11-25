@@ -112,11 +112,35 @@ fails processing is quarantined in `spool/bad` while the rest commit.
     inscribe consolidate (--session S | --catch-up) [--agent A] [--dry-run]
     inscribe undo RUN_ID
     inscribe sync --agent claude-code|codex|gemini [--project P] [--include-global]
-    inscribe score (train|show [--outcomes]|combine --dir DIR)
+    inscribe score (train|show [--outcomes]|replay [--days N]|combine --dir DIR)
     inscribe stats [--days N] [--all] [--explain] [--json]
     inscribe stats ingest --catch-up [--limit N]
     inscribe serve [--addr 127.0.0.1:7331]
     inscribe mcp
+
+`inscribe serve` opens a local dashboard at http://127.0.0.1:7331: how often recalled
+lines were rated helpful, tokens injected per hook, the score model, a recall preview
+that writes nothing, a searchable memory list with each memory's ratings and evidence
+(and a Forget button), how inscribe works, and a settings form for the scalar keys of
+`config.toml`. It listens on loopback only and refuses other hosts and cross-site posts.
+
+When a session ends, the idle `score train` pass writes a `session` memory for it:
+what was asked, the files changed, and the commands that passed, built from the
+stored events with no model call. A later prompt in the same project recalls it
+("what did we change for the webhooks?") instead of searching old transcripts.
+Summaries start with the first pass after install; older sessions get none.
+
+Session-start and subagent lines are never rated by the agent. `inscribe score
+replay` rates their command lines from what the session ran next: the command
+ran and passed is helpful; a different command of the same kind, or a failure,
+is not. These ratings show on the dashboard and never train the score model.
+
+Recall settings in `[recall]` beyond the budgets:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `subagent_budget` | `80` | Token budget for a subagent start; `0` is off. Lines the session already showed are never repeated. |
+| `cross_project` | `0.6` | Score scale for notes, decisions, fixes and project facts from your other projects on a prompt, and lets MCP `recall` read another project; `0` keeps recall inside the current project. Only the global `config.toml` may set it. |
 
 `inscribe mcp` serves `remember`, `recall`, `forget`, `why` and `feedback` for the project it
 starts in (the git root of its working directory). Every argument except the

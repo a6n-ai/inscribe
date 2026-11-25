@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -88,6 +89,11 @@ func runHook(args []string, stdin io.Reader, stdout io.Writer) error {
 		logLine(config.Home(), "saved: %v", err)
 	}
 	q, ok := hookQuery(e, h.Scrub)
+	subagent := e.Kind == model.SubagentStart
+	if subagent {
+		q.Budget = h.RecallConfig().SubagentBudget
+		ok = ok && q.Budget > 0
+	}
 	if !ok {
 		out, asked := askFeedback(ctx, h, ad, event, e, saved, nil)
 		logDroppedInjections(h)
@@ -108,6 +114,9 @@ func runHook(args []string, stdin io.Reader, stdout io.Writer) error {
 	lines, err := h.Recall(ctx, q)
 	if err != nil {
 		return err
+	}
+	if subagent && e.Session != "" {
+		lines = unseenLines(h, e.Session, lines)
 	}
 	if n := h.DroppedOutcomes(); n > 0 {
 		logLine(config.Home(), "recall: dropped %d outcome rows (store locked)", n)
@@ -358,6 +367,17 @@ func spawnStatsIngest(e inscribe.Event) error {
 		return nil
 	}
 	return spawnDetached("stats", "ingest", "--catch-up")
+}
+
+// unseenLines drops lines the session already injected. A subagent shares its
+// parent's session id, so the parent's session-start lines would only repeat.
+func unseenLines(h *inscribe.Inscribe, session string, lines []recall.Line) []recall.Line {
+	seen, err := h.SessionInjectedIDs(session)
+	if err != nil {
+		logLine(config.Home(), "session injected ids: %v", err)
+		return lines
+	}
+	return slices.DeleteFunc(lines, func(l recall.Line) bool { return l.MemoryID != "" && seen[l.MemoryID] })
 }
 
 // hookQuery picks what to recall for an event by its kind, so every agent's

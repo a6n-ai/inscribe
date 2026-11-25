@@ -5,21 +5,18 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"html/template"
 	"io"
 	"io/fs"
+	"maps"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/a6n-ai/inscribe"
 	"github.com/a6n-ai/inscribe/internal/config"
-	"github.com/a6n-ai/inscribe/internal/recall"
 )
 
 const defaultServeAddr = "127.0.0.1:7331"
@@ -71,7 +68,18 @@ func newServeHandler(home, host string, port int) http.Handler {
 		hosts["[::1]:"+p] = true
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { serveIndex(w, home) })
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { serveOverview(w, r, home) })
+	mux.HandleFunc("GET /recall", func(w http.ResponseWriter, r *http.Request) { serveRecall(w, r, home) })
+	mux.HandleFunc("GET /memories", func(w http.ResponseWriter, r *http.Request) { serveMemories(w, r, home) })
+	mux.HandleFunc("GET /memories/{id}", func(w http.ResponseWriter, r *http.Request) { serveMemory(w, r, home) })
+	mux.HandleFunc("POST /memories/{id}/forget", func(w http.ResponseWriter, r *http.Request) { serveForget(w, r, home) })
+	mux.HandleFunc("GET /discover", func(w http.ResponseWriter, r *http.Request) { serveDiscover(w, r, home) })
+	mux.HandleFunc("POST /memories/{id}/rate", func(w http.ResponseWriter, r *http.Request) { serveRate(w, r, home) })
+	mux.HandleFunc("POST /replay", func(w http.ResponseWriter, r *http.Request) { serveReplay(w, r, home) })
+	mux.HandleFunc("POST /memories/forget", func(w http.ResponseWriter, r *http.Request) { serveForgetMany(w, r, home) })
+	mux.HandleFunc("GET /how", func(w http.ResponseWriter, r *http.Request) { render(w, "how", nil) })
+	mux.HandleFunc("GET /settings", func(w http.ResponseWriter, r *http.Request) { serveSettings(w, r, home) })
+	mux.HandleFunc("POST /settings", func(w http.ResponseWriter, r *http.Request) { serveSaveSettings(w, r, home) })
 	mux.HandleFunc("POST /share", func(w http.ResponseWriter, r *http.Request) { serveShare(w, r, home) })
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Frame-Options", "DENY")
@@ -84,73 +92,8 @@ func newServeHandler(home, host string, port int) http.Handler {
 	})
 }
 
-type weightRow struct {
-	Name  string
-	Value float64
-}
-
-type indexPage struct {
-	Weights              []weightRow
-	Seen, Hits, Misses   int
-	LabelRule, StepRule  string
-	Analytics            bool
-	Next, Button         string
-	ShareHost, ShareNote string
-}
-
-func serveIndex(w http.ResponseWriter, home string) {
-	cfg, _, err := config.Load(home, "")
-	if err != nil {
-		http.Error(w, "config.toml does not load; run inscribe doctor", http.StatusInternalServerError)
-		return
-	}
-	h, err := inscribe.Open(inscribe.Options{Home: home, Caller: "inscribe"})
-	if err != nil {
-		http.Error(w, "the score store does not open; run inscribe doctor", http.StatusInternalServerError)
-		return
-	}
-	defer func() { _ = h.Close() }()
-	wt, err := h.ScoreWeights()
-	if err != nil {
-		http.Error(w, "the score model does not load", http.StatusInternalServerError)
-		return
-	}
-	page := indexPage{
-		Weights: []weightRow{{"text (pinned)", wt.Text}, {"key", wt.Key}, {"body", wt.Body}, {"type", wt.Type},
-			{"scope", wt.Scope}, {"agent", wt.Agent}, {"command", wt.Command}, {"trajectory", wt.Trajectory}},
-		Seen: wt.Seen, Hits: wt.Hits, Misses: wt.Misses,
-		LabelRule: recall.LabelRule, StepRule: recall.StepRule,
-		Analytics: cfg.Share.Analytics,
-		Next:      "1", Button: "Turn sharing on",
-	}
-	switch {
-	case cfg.Share.URL == "":
-		page.ShareHost = "empty"
-	case shareURLOK(cfg.Share.URL):
-		u, _ := url.Parse(cfg.Share.URL)
-		page.ShareHost = u.Hostname()
-	default:
-		page.ShareHost = "not usable"
-	}
-	if cfg.Share.Analytics {
-		page.Next, page.Button = "0", "Turn sharing off"
-		if !shareURLOK(cfg.Share.URL) {
-			page.ShareNote = "Sharing is on, but the share URL is not an absolute http or https URL. Nothing is uploaded."
-		}
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := indexTmpl.Execute(w, page); err != nil {
-		http.Error(w, "the page could not be rendered", http.StatusInternalServerError)
-	}
-}
-
 func serveShare(w http.ResponseWriter, r *http.Request, home string) {
-	if o := r.Header.Get("Origin"); o != "" && o != "http://"+r.Host {
-		http.Error(w, "cross-origin change refused", http.StatusForbidden)
-		return
-	}
-	if sf := r.Header.Get("Sec-Fetch-Site"); sf != "" && sf != "same-origin" && sf != "none" {
-		http.Error(w, "cross-site change refused", http.StatusForbidden)
+	if !sameOrigin(w, r) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -175,7 +118,20 @@ func serveShare(w http.ResponseWriter, r *http.Request, home string) {
 		http.Error(w, "the config change failed; run inscribe doctor", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
+// sameOrigin refuses a change that a page on another origin could have sent.
+func sameOrigin(w http.ResponseWriter, r *http.Request) bool {
+	if o := r.Header.Get("Origin"); o != "" && o != "http://"+r.Host {
+		http.Error(w, "cross-origin change refused", http.StatusForbidden)
+		return false
+	}
+	if sf := r.Header.Get("Sec-Fetch-Site"); sf != "" && sf != "same-origin" && sf != "none" {
+		http.Error(w, "cross-site change refused", http.StatusForbidden)
+		return false
+	}
+	return true
 }
 
 var errShareNotTable = errors.New("share is not a table")
@@ -183,31 +139,49 @@ var errShareNotTable = errors.New("share is not a table")
 // setShareAnalytics sets share.analytics in the global config and leaves every other
 // key as it was. Comments in an existing file are not kept.
 func setShareAnalytics(home string, on bool) error {
-	raw, err := os.ReadFile(filepath.Join(home, "config.toml")) //nolint:gosec // G304: the config path is under the user's INSCRIBE_HOME
-	if errors.Is(err, fs.ErrNotExist) {
-		return writeConfigFile(home, fmt.Appendf(nil, "[share]\nanalytics = %t\n", on))
-	}
-	if err != nil {
-		return err
-	}
+	return setConfigValues(home, map[string]map[string]any{"share": {"analytics": on}})
+}
+
+// setConfigValues sets table.key values in the global config, "" naming the top
+// level, and leaves every other key as it was. Comments in an existing file are not kept.
+func setConfigValues(home string, set map[string]map[string]any) error {
 	doc := map[string]any{}
-	if _, err := toml.Decode(string(raw), &doc); err != nil {
+	raw, err := os.ReadFile(filepath.Join(home, "config.toml")) //nolint:gosec // G304: the config path is under the user's INSCRIBE_HOME
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
 		return err
-	}
-	share := map[string]any{}
-	if cur, ok := doc["share"]; ok {
-		if share, ok = cur.(map[string]any); !ok {
-			return errShareNotTable
+	default:
+		if _, err := toml.Decode(string(raw), &doc); err != nil {
+			return err
 		}
 	}
-	share["analytics"] = on
-	doc["share"] = share
+	for table, kv := range set {
+		target := doc
+		if table != "" {
+			target = map[string]any{}
+			if cur, ok := doc[table]; ok {
+				if target, ok = cur.(map[string]any); !ok {
+					if table == "share" {
+						return errShareNotTable
+					}
+					return fmt.Errorf("%w: %s", errNotTable, table)
+				}
+			}
+			doc[table] = target
+		}
+		maps.Copy(target, kv)
+	}
 	var buf bytes.Buffer
-	if err := toml.NewEncoder(&buf).Encode(doc); err != nil {
+	enc := toml.NewEncoder(&buf)
+	enc.Indent = ""
+	if err := enc.Encode(doc); err != nil {
 		return err
 	}
 	return writeConfigFile(home, buf.Bytes())
 }
+
+var errNotTable = errors.New("config key is not a table")
 
 // writeConfigFile replaces config.toml through a temp file in the same directory, so a
 // crash never leaves a half-written config.
@@ -250,35 +224,3 @@ func writeConfigFile(home string, data []byte) error {
 	}
 	return nil
 }
-
-var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Inscribe score</title>
-<style>
-body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
-table { border-collapse: collapse; }
-th, td { padding: 0.2rem 1rem 0.2rem 0; text-align: left; }
-</style>
-</head>
-<body>
-<h1>Inscribe score model</h1>
-<h2>Weights</h2>
-<table>
-{{range .Weights}}<tr><th>{{.Name}}</th><td>{{printf "%.3f" .Value}}</td></tr>
-{{end}}</table>
-<p>seen {{.Seen}}, hits {{.Hits}}, misses {{.Misses}}</p>
-<p>label_rule {{.LabelRule}}, step_rule {{.StepRule}}</p>
-<h2>Share</h2>
-<p>analytics: {{if .Analytics}}on{{else}}off{{end}}</p>
-<p>share host: {{.ShareHost}}</p>
-{{if .ShareNote}}<p>{{.ShareNote}}</p>{{end}}
-<form method="post" action="/share">
-<input type="hidden" name="analytics" value="{{.Next}}">
-<button type="submit">{{.Button}}</button>
-</form>
-</body>
-</html>
-`))

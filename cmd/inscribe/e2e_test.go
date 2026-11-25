@@ -156,6 +156,44 @@ func TestSubagentStartRecall(t *testing.T) {
 	}
 }
 
+func TestSubagentStartSkipsLinesTheSessionShowed(t *testing.T) {
+	home, proj := t.TempDir(), t.TempDir()
+	for range 3 {
+		hookOK(t, home, bashPayload("PostToolUse", "s1", proj, "go test ./...", ""), "PostToolUse")
+	}
+	start := additionalContext(t, hookOK(t, home, map[string]any{"session_id": "s1", "cwd": proj, "hook_event_name": "SessionStart"}, "SessionStart"))
+	if !strings.Contains(start, "go test ./...") {
+		t.Fatalf("session start = %q", start)
+	}
+	in := map[string]any{"session_id": "s1", "cwd": proj, "hook_event_name": "SubagentStart", "agent_id": "a1", "agent_type": "Explore"}
+	if out := hookOK(t, home, in, "SubagentStart"); strings.Contains(out, "go test ./...") {
+		t.Fatalf("subagent repeated a line its session showed: %q", out)
+	}
+	// Another session has not seen the line, so its subagent still gets it.
+	in["session_id"] = "s2"
+	if ctx := additionalContext(t, hookOK(t, home, in, "SubagentStart")); !strings.Contains(ctx, "go test ./...") {
+		t.Fatalf("subagent of a new session = %q", ctx)
+	}
+	// The second start in s2 repeats nothing.
+	if out := hookOK(t, home, in, "SubagentStart"); strings.Contains(out, "go test ./...") {
+		t.Fatalf("second subagent repeated a line: %q", out)
+	}
+}
+
+func TestSubagentBudgetZeroInjectsNothing(t *testing.T) {
+	home, proj := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte("[recall]\nsubagent_budget = 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		hookOK(t, home, bashPayload("PostToolUse", "s1", proj, "go test ./...", ""), "PostToolUse")
+	}
+	in := map[string]any{"session_id": "s1", "cwd": proj, "hook_event_name": "SubagentStart", "agent_id": "a1", "agent_type": "Explore"}
+	if out := hookOK(t, home, in, "SubagentStart"); strings.Contains(out, "go test ./...") {
+		t.Fatalf("subagent_budget = 0 still injected: %q", out)
+	}
+}
+
 func TestCUJ3KnownError(t *testing.T) {
 	home, proj := t.TempDir(), t.TempDir()
 	file := filepath.Join(proj, "auth.ts")
@@ -1261,5 +1299,36 @@ func TestFeedbackAskInjection(t *testing.T) {
 				t.Fatalf("est_tokens = %d, want %d", est, want)
 			}
 		})
+	}
+}
+
+func TestSessionSummaryRecalledByALaterPrompt(t *testing.T) {
+	home, proj := t.TempDir(), t.TempDir()
+	hookOK(t, home, map[string]any{"session_id": "s0", "cwd": proj, "hook_event_name": "UserPromptSubmit",
+		"prompt": "an old session about the billing webhooks durable queue"}, "UserPromptSubmit")
+	hookOK(t, home, map[string]any{"session_id": "s0", "cwd": proj, "hook_event_name": "SessionEnd"}, "SessionEnd")
+	// The first pass only marks when summaries start; s0 ended before it and is never summarized.
+	if _, errOut, code := runCLI(t, home, "", nil, "score", "train"); code != 0 {
+		t.Fatalf("first train exit %d: %s", code, errOut)
+	}
+	hookOK(t, home, map[string]any{"session_id": "s1", "cwd": proj, "hook_event_name": "UserPromptSubmit",
+		"prompt": "move the billing webhooks onto the durable queue"}, "UserPromptSubmit")
+	hookOK(t, home, map[string]any{"session_id": "s1", "cwd": proj, "hook_event_name": "PostToolUse", "tool_name": "Edit",
+		"tool_input": map[string]any{"file_path": filepath.Join(proj, "webhooks.go"), "old_string": "a", "new_string": "b"}}, "PostToolUse")
+	hookOK(t, home, map[string]any{"session_id": "s1", "cwd": proj, "hook_event_name": "SessionEnd"}, "SessionEnd")
+	if _, errOut, code := runCLI(t, home, "", nil, "score", "train"); code != 0 {
+		t.Fatalf("train exit %d: %s", code, errOut)
+	}
+	ctx := additionalContext(t, hookOK(t, home, map[string]any{"session_id": "s2", "cwd": proj, "hook_event_name": "UserPromptSubmit",
+		"prompt": "what did we change for the billing webhooks durable queue"}, "UserPromptSubmit"))
+	if !strings.Contains(ctx, "[session]") || !strings.Contains(ctx, "webhooks.go") {
+		t.Fatalf("later prompt context = %q, want the session summary", ctx)
+	}
+	if strings.Contains(ctx, "an old session") {
+		t.Fatalf("a session from before summaries started was summarized: %q", ctx)
+	}
+	start := hookOK(t, home, map[string]any{"session_id": "s3", "cwd": proj, "hook_event_name": "SessionStart"}, "SessionStart")
+	if strings.Contains(start, "[session]") {
+		t.Fatalf("session start injected a session summary: %q", start)
 	}
 }

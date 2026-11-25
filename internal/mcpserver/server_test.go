@@ -24,6 +24,16 @@ func openInscribe(t *testing.T, proj string) *inscribe.Inscribe {
 	return openAt(t, t.TempDir(), proj)
 }
 
+// openStrict opens with recall.cross_project = 0, so recall stays inside the server's project.
+func openStrict(t *testing.T, proj string) *inscribe.Inscribe {
+	t.Helper()
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte("[recall]\ncross_project = 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return openAt(t, home, proj)
+}
+
 func openAt(t *testing.T, home, proj string) *inscribe.Inscribe {
 	t.Helper()
 	h, err := inscribe.Open(inscribe.Options{Home: home, Caller: "test", Project: proj})
@@ -135,7 +145,7 @@ func TestMCPScrubsRemember(t *testing.T) {
 
 func TestMCPRecallDefaultsToServerProject(t *testing.T) {
 	projA, projB := t.TempDir(), t.TempDir()
-	h := openInscribe(t, projA)
+	h := openStrict(t, projA)
 	ctx := context.Background()
 	if _, err := h.Remember(ctx, "projA uses make deploy", model.Note, model.ProjectScope, projA); err != nil {
 		t.Fatal(err)
@@ -215,7 +225,7 @@ func TestMCPReachesRepoInsideWorkspace(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(repo, "sub"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	h := openInscribe(t, workspace)
+	h := openStrict(t, workspace)
 	cs := connect(t, h, workspace)
 	if _, isErr := call(t, cs, "remember", map[string]any{"text": "repo deploys with make ship", "project": filepath.Join(repo, "sub")}); isErr {
 		t.Fatal("remember refused a repo inside the workspace")
@@ -717,5 +727,28 @@ func TestMCPFeedbackRepeatedWrongAcrossAsks(t *testing.T) {
 	gm, ok := found[global]
 	if !ok || math.Abs(gm.Penalty-0.25) > 1e-9 {
 		t.Fatalf("global memory penalty = %v, want 0.25 (0.05 per wrong answer)", gm.Penalty)
+	}
+}
+
+func TestMCPRecallReadsAnotherProject(t *testing.T) {
+	here, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := openInscribe(t, here)
+	if _, err := h.Remember(context.Background(), "the billing service retries webhooks three times", model.Note, model.ProjectScope, other); err != nil {
+		t.Fatal(err)
+	}
+	cs := connect(t, h, here)
+	out, isErr := call(t, cs, "recall", map[string]any{"project": other, "query": "billing webhooks retries"})
+	if isErr || !strings.Contains(out, "retries webhooks") {
+		t.Fatalf("recall of another project = %q, error %v", out, isErr)
+	}
+	if _, isErr := call(t, cs, "remember", map[string]any{"text": "x", "project": other}); !isErr {
+		t.Fatal("remember wrote into another project")
 	}
 }

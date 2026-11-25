@@ -25,5 +25,5 @@ func MemoryDoc(m model.Memory) Doc {
 		tags = append(tags, "file:"+m.Scope)
 	}
 	// Distinct terms, as the FTS5 terms column stores them, so a repeated word counts once.
-	return Doc{ID: m.ID, Fields: map[string]string{"text": strings.Join(text.Terms(m.Text), " "), "key": m.Key}, Tags: tags}
+	return Doc{ID: m.ID, Fields: map[string]string{"text": strings.Join(text.Terms(model.SearchText(m)), " "), "key": m.Key}, Tags: tags}
 }

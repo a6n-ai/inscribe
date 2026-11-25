@@ -295,7 +295,7 @@ func (t *Tx) UpsertMemory(m *model.Memory, merge func(prev, next map[string]any)
 		}
 		if _, err := t.tx.Exec(`INSERT INTO memories(id, type, scope_kind, scope, key, body, text, terms, count, confidence, status,
 			superseded_by, first_seen, last_seen, last_used) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			m.ID, string(m.Type), string(m.ScopeKind), m.Scope, m.Key, body, m.Text, termsOf(m.Text), m.Count, m.Confidence, string(m.Status),
+			m.ID, string(m.Type), string(m.ScopeKind), m.Scope, m.Key, body, m.Text, termsOf(model.SearchText(*m)), m.Count, m.Confidence, string(m.Status),
 			nullable(m.SupersededBy), m.FirstSeen, m.LastSeen, nullInt(m.LastUsed)); err != nil {
 			return nil, err
 		}
@@ -312,7 +312,7 @@ func (t *Tx) UpsertMemory(m *model.Memory, merge func(prev, next map[string]any)
 			return nil, err
 		}
 		if _, err := t.tx.Exec(`UPDATE memories SET count=?, last_seen=?, body=?, text=?, terms=?, confidence=? WHERE id=?`,
-			existing.Count, existing.LastSeen, body, existing.Text, termsOf(existing.Text), existing.Confidence, existing.ID); err != nil {
+			existing.Count, existing.LastSeen, body, existing.Text, termsOf(model.SearchText(*existing)), existing.Confidence, existing.ID); err != nil {
 			return nil, err
 		}
 		m = existing
@@ -449,6 +449,15 @@ func (s *Store) ListMemories(f ListFilter) ([]model.Memory, error) {
 
 // SearchFTS searches memory text and key. Each term is matched as a prefix and
 // terms are ORed. Scores are SQLite bm25 values (lower is better).
+// ftsTags is the OR of the tags column values for vs, as migration 0011 writes them.
+func ftsTags[T ~string](prefix string, vs []T) string {
+	parts := make([]string, 0, len(vs))
+	for _, v := range vs {
+		parts = append(parts, prefix+strings.ReplaceAll(string(v), "_", ""))
+	}
+	return strings.Join(parts, " OR ")
+}
+
 func (s *Store) SearchFTS(terms []string, f ListFilter, limit int) ([]model.Memory, []float64, error) {
 	var q []string
 	for _, t := range terms {
@@ -462,12 +471,20 @@ func (s *Store) SearchFTS(terms []string, f ListFilter, limit int) ([]model.Memo
 		return nil, nil, nil
 	}
 	where, args := filterSQL("m", f)
+	// Type and status narrow the match inside the index; filterSQL still checks them.
+	match := "{terms key} : (" + strings.Join(q, " OR ") + ")"
+	if tags := ftsTags("ty", f.Types); tags != "" {
+		match += " AND tags : (" + tags + ")"
+	}
+	if tags := ftsTags("st", f.Statuses); tags != "" {
+		match += " AND tags : (" + tags + ")"
+	}
 	//nolint:gosec // G202: only "?" placeholders are concatenated; every value is bound
 	query := `SELECT m.id, m.type, m.scope_kind, m.scope, m.key, m.body, m.text, m.count, m.confidence, m.status,
-		m.superseded_by, m.first_seen, m.last_seen, m.last_used, m.penalty, bm25(memories_fts)
+		m.superseded_by, m.first_seen, m.last_seen, m.last_used, m.penalty, bm25(memories_fts, 1.0, 1.0, 0.0)
 		FROM memories_fts JOIN memories m ON m.rowid = memories_fts.rowid
-		WHERE memories_fts MATCH ?` + where + ` ORDER BY bm25(memories_fts) LIMIT ?`
-	all := append([]any{strings.Join(q, " OR ")}, args...)
+		WHERE memories_fts MATCH ?` + where + ` ORDER BY bm25(memories_fts, 1.0, 1.0, 0.0) LIMIT ?`
+	all := append([]any{match}, args...)
 	all = append(all, limit)
 	rows, err := s.db.Query(query, all...)
 	if err != nil {

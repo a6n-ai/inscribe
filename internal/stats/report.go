@@ -83,7 +83,7 @@ type Report struct {
 
 var sourceOfReason = map[string]string{
 	"full_command": "rule", "forgotten": "rule", "corrected": "rule", "failed": "rule",
-	"agent": "agent", "agent_wrong": "agent", "review": "review", "review_wrong": "review",
+	"agent": "agent", "agent_wrong": "agent", "review": "review", "review_wrong": "review", "replay": "rule",
 }
 
 // Build computes the report for w. now bounds the 30-day unused-memory check.

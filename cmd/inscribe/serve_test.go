@@ -140,7 +140,7 @@ func TestServeShareRejectsBadInput(t *testing.T) {
 
 func TestServeHidesSecrets(t *testing.T) {
 	home := t.TempDir()
-	writeConfig(t, home, "[share]\nanalytics = true\nurl = \"https://tok@host.example/x?q=secret\"\n")
+	writeConfig(t, home, "[share]\nanalytics = true\nurl = \"https://usr-zq9@host.example/xp9?q=secret\"\n")
 	h, err := inscribe.Open(inscribe.Options{Home: home, Caller: "inscribe"})
 	if err != nil {
 		t.Fatal(err)
@@ -152,17 +152,19 @@ func TestServeHidesSecrets(t *testing.T) {
 	if err := h.Close(); err != nil {
 		t.Fatal(err)
 	}
-	rec := serveReq(newServeHandler(home, "127.0.0.1", 7331), "GET", "/", "", testHost, nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	body := rec.Body.String()
-	if !strings.Contains(body, "host.example") {
-		t.Fatalf("page does not show the host")
-	}
-	for _, secret := range []string{"tok", "secret", "/x", id} {
-		if strings.Contains(body, secret) {
-			t.Fatalf("page leaks %q", secret)
+	for _, page := range []string{"/", "/settings"} {
+		rec := serveReq(newServeHandler(home, "127.0.0.1", 7331), "GET", page, "", testHost, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200", page, rec.Code)
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "host.example") {
+			t.Fatalf("%s does not show the host", page)
+		}
+		for _, secret := range []string{"usr-zq9", "secret", "/xp9", id} {
+			if strings.Contains(body, secret) {
+				t.Fatalf("%s leaks %q", page, secret)
+			}
 		}
 	}
 }

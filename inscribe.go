@@ -9,9 +9,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,6 +23,7 @@ import (
 	"github.com/a6n-ai/inscribe/internal/config"
 	"github.com/a6n-ai/inscribe/internal/consolidate"
 	"github.com/a6n-ai/inscribe/internal/extract"
+	"github.com/a6n-ai/inscribe/internal/feedback"
 	"github.com/a6n-ai/inscribe/internal/importer"
 	"github.com/a6n-ai/inscribe/internal/recall"
 	"github.com/a6n-ai/inscribe/internal/retention"
@@ -275,7 +278,28 @@ func (h *Inscribe) Retention(ctx context.Context, dryRun bool) (retention.Report
 func (h *Inscribe) AutoRetention(ctx context.Context) (bool, error) {
 	ran, err := retention.Auto(ctx, h.store, h.cfg.Retention, time.Now())
 	h.afterWrite()
+	if ran && err == nil {
+		// After a prune, so the pages it freed go back to the disk.
+		if vacuumed, cerr := h.store.Compact(ctx); cerr != nil {
+			appendLog(h.home, fmt.Sprintf("retention: compact: %v", cerr))
+		} else if vacuumed {
+			appendLog(h.home, "retention: switched the database to incremental auto-vacuum")
+		}
+		rotateLog(h.home, logMax)
+	}
 	return ran, err
+}
+
+// logMax is the size at which inscribe.log moves to inscribe.log.1.
+const logMax = 1 << 20
+
+// rotateLog keeps one previous log: past max bytes, inscribe.log replaces
+// inscribe.log.1 and the next line starts a new file.
+func rotateLog(home string, max int64) {
+	path := filepath.Join(home, "inscribe.log")
+	if info, err := os.Stat(path); err == nil && info.Size() > max {
+		_ = os.Rename(path, path+".1")
+	}
 }
 
 // Consolidate reviews a session's new events through runner. A dry run returns
@@ -388,6 +412,19 @@ type StatsOptions struct {
 
 // Stats renders the value report as text, or as JSON when o.JSON is set.
 func (h *Inscribe) Stats(ctx context.Context, o StatsOptions) (string, error) {
+	r, err := h.StatsReport(ctx, o)
+	if err != nil {
+		return "", err
+	}
+	if o.JSON {
+		b, err := json.MarshalIndent(r, "", "  ")
+		return string(b) + "\n", err
+	}
+	return stats.Text(r, o.Explain), nil
+}
+
+// StatsReport computes the value report that Stats renders.
+func (h *Inscribe) StatsReport(_ context.Context, o StatsOptions) (stats.Report, error) {
 	days := o.Days
 	if days <= 0 {
 		days = 7
@@ -397,15 +434,123 @@ func (h *Inscribe) Stats(ctx context.Context, o StatsOptions) (string, error) {
 	if o.All {
 		w.Project = ""
 	}
-	r, err := stats.Build(h.store, w, h.cfg.Stats, now)
+	return stats.Build(h.store, w, h.cfg.Stats, now)
+}
+
+// SessionInjectedIDs returns the memories already injected into session.
+func (h *Inscribe) SessionInjectedIDs(session string) (map[string]bool, error) {
+	return h.store.SessionInjectedIDs(session)
+}
+
+// window is the last days days, across every project.
+func window(days int) store.Window {
+	now := time.Now()
+	return store.Window{From: now.Add(-time.Duration(days) * 24 * time.Hour).UnixMilli(), To: now.UnixMilli() + 1}
+}
+
+// HookRatings returns tokens and ratings per injecting hook over the last days days.
+func (h *Inscribe) HookRatings(days int) ([]store.HookRating, error) {
+	return h.store.HookRatings(window(days))
+}
+
+// UnhelpfulShown returns memories shown at least minShown times in the last days
+// days that no rating there called helpful.
+func (h *Inscribe) UnhelpfulShown(days, minShown, limit int) ([]store.ShownTally, error) {
+	return h.store.UnhelpfulShown(window(days), minShown, limit)
+}
+
+// ReplayRatings rates command lines shown at session and subagent start in the
+// last days days, from what each session ran next. Sessions active in the last
+// hour are left for a later pass, so a line is not rated before it had its chance.
+func (h *Inscribe) ReplayRatings(ctx context.Context, days int) (int, error) {
+	now := time.Now()
+	w := window(days)
+	w.To = now.Add(-time.Hour).UnixMilli()
+	return recall.Replay(ctx, h.store, w, now)
+}
+
+// Rate records a hand rating of a memory: "yes", "no", or "wrong", which also
+// lowers the memory's confidence at recall the way an agent's "wrong" does.
+func (h *Inscribe) Rate(ctx context.Context, id, answer string) error {
+	m, err := h.store.GetMemory(id)
 	if err != nil {
-		return "", err
+		return err
 	}
-	if o.JSON {
-		b, err := json.MarshalIndent(r, "", "  ")
-		return string(b) + "\n", err
+	label := 0
+	switch answer {
+	case "yes":
+		label = 1
+	case "no", "wrong":
+	default:
+		return fmt.Errorf("rating %q is not yes, no or wrong", answer)
 	}
-	return stats.Text(r, o.Explain), nil
+	return h.store.Write(ctx, func(tx *store.Tx) error {
+		if answer == "wrong" {
+			if err := tx.AddPenalty(id, feedback.Penalty(*m)); err != nil {
+				return err
+			}
+		}
+		return tx.InsertRating(id, store.UserSession, "", store.ReasonUser, label, time.Now().UnixMilli())
+	})
+}
+
+// summariesSinceKey holds when session summaries started. Sessions that ended
+// before it never get one: summaries start with the install, not backfilled.
+const summariesSinceKey = "session_summaries_since"
+
+// SummarizeSessions writes a session summary memory for up to limit sessions
+// that ended since summaries started and have none, from their events alone.
+func (h *Inscribe) SummarizeSessions(ctx context.Context, now time.Time, limit int) (int, error) {
+	since, ok, err := h.store.GetMeta(summariesSinceKey)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		since = strconv.FormatInt(now.UnixMilli(), 10)
+		return 0, h.store.Write(ctx, func(tx *store.Tx) error { return tx.SetMeta(summariesSinceKey, since) })
+	}
+	from, err := strconv.ParseInt(since, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s = %q: %w", summariesSinceKey, since, err)
+	}
+	ids, err := h.store.UnsummarizedSessions(from, limit)
+	if err != nil {
+		return 0, err
+	}
+	var ms []*Memory
+	for _, id := range ids {
+		evs, err := h.store.EventsIn(id, 0, math.MaxInt64)
+		if err != nil {
+			return 0, err
+		}
+		if m, ok := extract.SessionSummary(evs); ok {
+			ms = append(ms, m)
+		}
+	}
+	if len(ms) == 0 {
+		return 0, nil
+	}
+	err = h.store.Write(ctx, func(tx *store.Tx) error {
+		for _, m := range ms {
+			if _, err := tx.UpsertMemory(m, nil, 0); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	h.afterWrite()
+	return len(ms), err
+}
+
+// RecallConfig returns the effective [recall] settings.
+func (h *Inscribe) RecallConfig() config.RecallCfg { return h.cfg.Recall }
+
+// GetMemory returns the memory with id, or an error when there is none.
+func (h *Inscribe) GetMemory(id string) (*Memory, error) { return h.store.GetMemory(id) }
+
+// MemoryOutcomes returns how often a memory was shown and rated, with its newest rows.
+func (h *Inscribe) MemoryOutcomes(id string, limit int) ([]store.MemoryOutcome, int, int, int, error) {
+	return h.store.MemoryOutcomes(id, limit)
 }
 
 // IngestUsage reads Claude Code token usage for up to limit finished sessions.

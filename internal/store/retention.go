@@ -144,3 +144,18 @@ func (t *Tx) DropOrphanEvidence() error {
 	_, err := t.tx.Exec(`DELETE FROM memory_evidence WHERE event_id NOT IN (SELECT id FROM events)`)
 	return err
 }
+
+// TrimSessionSummaries deletes session summary memories beyond the newest keep
+// of each project.
+func (t *Tx) TrimSessionSummaries(keep int) (int64, error) {
+	const pick = `SELECT id FROM (SELECT id, row_number() OVER (PARTITION BY scope ORDER BY last_seen DESC, id) rn
+		FROM memories WHERE type = 'session') WHERE rn > ?`
+	if _, err := t.tx.Exec(`DELETE FROM memory_evidence WHERE memory_id IN (`+pick+`)`, keep); err != nil {
+		return 0, err
+	}
+	res, err := t.tx.Exec(`DELETE FROM memories WHERE id IN (`+pick+`)`, keep)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

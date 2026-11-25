@@ -19,7 +19,7 @@ import (
 	"github.com/a6n-ai/inscribe/internal/store"
 )
 
-const scoreUsage = "usage: inscribe score (train|show [--outcomes]|combine --dir DIR)"
+const scoreUsage = "usage: inscribe score (train|show [--outcomes]|replay [--days N]|combine --dir DIR)"
 
 func scoreCmd(args []string, stdout io.Writer) error {
 	if len(args) == 0 {
@@ -35,7 +35,28 @@ func scoreCmd(args []string, stdout io.Writer) error {
 	}
 	defer func() { _ = h.Close() }()
 	switch args[0] {
+	case "replay":
+		flags := flag.NewFlagSet("score replay", flag.ContinueOnError)
+		days := flags.Int("days", 90, "rate lines shown in the last N days")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		n, err := h.ReplayRatings(context.Background(), *days)
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(stdout, "rated %d shown command line(s) from what their sessions ran next\n", n)
+		return err
 	case "train":
+		// Ended sessions get their summary and replay ratings in the same idle pass.
+		if n, err := h.SummarizeSessions(context.Background(), time.Now(), 20); err != nil {
+			logLine(home, "score train: summarize: %v", err)
+		} else if n > 0 {
+			logLine(home, "score train: summarized %d session(s)", n)
+		}
+		if _, err := h.ReplayRatings(context.Background(), 2); err != nil {
+			logLine(home, "score train: replay: %v", err)
+		}
 		res, err := h.TrainScores(context.Background(), time.Now())
 		if errors.Is(err, store.ErrLocked) {
 			logLine(home, "score train: skipped, another writer holds the store")

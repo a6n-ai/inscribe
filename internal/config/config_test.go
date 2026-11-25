@@ -25,9 +25,9 @@ func TestDefaultsWithNoFiles(t *testing.T) {
 		t.Fatalf("err=%v warns=%v", err, warns)
 	}
 	want := Config{
-		Recall:      RecallCfg{Inject: true, SessionBudget: 400, PromptMaxLines: 3, PromptThreshold: 0.35, HalfLifeDays: 30},
+		Recall:      RecallCfg{Inject: true, SessionBudget: 400, SubagentBudget: 80, CrossProject: 0.6, PromptMaxLines: 3, PromptThreshold: 0.35, HalfLifeDays: 30},
 		Consolidate: ConsolidateCfg{Auto: true, MinEvents: 20, InputBudget: 8000, Model: map[string]string{"claude-code": "haiku"}},
-		Retention:   RetentionCfg{Mode: "rolling", PromptTextDays: 30, PromptClock: "original", EventDays: 180, ReplaySampleMax: 20000, ReplayDays: 0},
+		Retention:   RetentionCfg{Mode: "rolling", PromptTextDays: 30, PromptClock: "original", EventDays: 180, TrajectoryDays: 30, ReplaySampleMax: 20000, ReplayDays: 0},
 		Skills:      SkillsCfg{Enabled: "auto", Enrich: []string{}},
 		Scrub:       ScrubCfg{Patterns: []string{}},
 		Exclude:     ExcludeCfg{Paths: []string{}},
@@ -207,5 +207,26 @@ func TestStatsProjectIgnored(t *testing.T) {
 	want := filepath.Join(proj, ".inscribe.toml") + ": ignored stats.holdout (only your global config.toml may set it)"
 	if !slices.Contains(warns, want) {
 		t.Fatalf("warns = %v, want %q", warns, want)
+	}
+}
+
+func TestCrossProjectIsGlobalOnly(t *testing.T) {
+	home, proj := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(home, "config.toml"), "[recall]\ncross_project = 0\n")
+	write(t, filepath.Join(proj, ".inscribe.toml"), "[recall]\ncross_project = 1\nprompt_max_lines = 5\n")
+	c, warns, err := Load(home, proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Recall.CrossProject != 0 || c.Recall.PromptMaxLines != 5 {
+		t.Fatalf("recall = %+v, project must not open cross-project recall", c.Recall)
+	}
+	want := filepath.Join(proj, ".inscribe.toml") + ": ignored recall.cross_project (only your global config.toml may set it)"
+	if !slices.Contains(warns, want) {
+		t.Fatalf("warns = %v, want %q", warns, want)
+	}
+	write(t, filepath.Join(home, "config.toml"), "[recall]\ncross_project = 1.5\n")
+	if _, _, err := Load(home, ""); err == nil {
+		t.Fatal("cross_project 1.5 accepted")
 	}
 }

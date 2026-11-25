@@ -2,6 +2,8 @@
 // nothing from Inscribe so that internal packages and the public API can share it.
 package model
 
+import "strings"
+
 type EventKind string
 
 const (
@@ -47,6 +49,8 @@ const (
 	SkillUse   MemoryType = "skill_use"
 	SkillFlow  MemoryType = "skill_flow"
 	Note       MemoryType = "note"
+	// Session summarizes one ended session of a project: what was asked and done.
+	Session MemoryType = "session"
 )
 
 type ScopeKind string
@@ -91,4 +95,27 @@ type Memory struct {
 // Penalty, never below 0.
 func (m Memory) EffectiveConfidence() float64 {
 	return max(m.Confidence-m.Penalty, 0)
+}
+
+// SearchText is the text a memory is found by: its text, and for a session
+// summary also the prompts and files its body keeps, which the one-line text
+// leaves out.
+func SearchText(m Memory) string {
+	if m.Type != Session {
+		return m.Text
+	}
+	parts := []string{m.Text}
+	for _, k := range []string{"prompts", "files"} {
+		switch v := m.Body[k].(type) {
+		case []string:
+			parts = append(parts, v...)
+		case []any:
+			for _, x := range v {
+				if s, ok := x.(string); ok {
+					parts = append(parts, s)
+				}
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
 }

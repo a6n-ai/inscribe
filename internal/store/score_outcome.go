@@ -143,7 +143,8 @@ func reasonIn(reasons []string) (string, []any) {
 // RecentScoreGroups returns the maxGroups groups whose newest row is latest,
 // oldest first, each with all of its rows.
 func (s *Store) RecentScoreGroups(maxGroups int) ([][]ScoreOutcome, error) {
-	q := `WITH g AS (SELECT o.session, o.prompt_digest FROM score_outcomes o
+	// Hand and replay ratings carry no features, so they never reach the score model's inputs.
+	q := `WITH g AS (SELECT o.session, o.prompt_digest FROM score_outcomes o WHERE o.reason NOT IN ('user', 'replay')
 		GROUP BY o.session, o.prompt_digest ORDER BY MAX(o.id) DESC LIMIT ?)
 		` + outcomeSelect + ` JOIN g ON g.session = o.session AND g.prompt_digest = o.prompt_digest ORDER BY o.id`
 	return s.queryGroups(q, maxGroups)
@@ -243,6 +244,43 @@ func (s *Store) SessionShownScores(session string) (map[string]float64, error) {
 			return nil, err
 		}
 		out[id] = score
+	}
+	return out, rows.Err()
+}
+
+// Ratings that never train the score model: they carry no prompt features.
+const (
+	ReasonUser   = "user"   // rated by hand on the dashboard
+	ReasonReplay = "replay" // rated from what a session did after the line was shown
+)
+
+// UserSession is the session that hand ratings are stored under.
+const UserSession = "dashboard"
+
+// InsertRating records a resolved rating of one memory. digest ties a replay
+// rating to the injection it rates ("inj:<id>").
+func (t *Tx) InsertRating(memoryID, session, digest, reason string, label int, ts int64) error {
+	_, err := t.tx.Exec(`INSERT INTO score_outcomes(memory_id, session, agent, ts, features, score,
+		prompt_digest, label, resolved, reason) VALUES (?, ?, '', ?, '[]', 0, ?, ?, ?, ?)`,
+		memoryID, session, ts, digest, label, ts, reason)
+	return err
+}
+
+// ReplayRated returns the session and memory pairs, joined by a NUL, that
+// already carry a replay rating.
+func (s *Store) ReplayRated() (map[string]bool, error) {
+	rows, err := s.db.Query(`SELECT DISTINCT session, memory_id FROM score_outcomes WHERE reason = ?`, ReasonReplay)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]bool{}
+	for rows.Next() {
+		var session, id string
+		if err := rows.Scan(&session, &id); err != nil {
+			return nil, err
+		}
+		out[session+"\x00"+id] = true
 	}
 	return out, rows.Err()
 }

@@ -37,7 +37,7 @@ type rememberIn struct {
 
 type recallIn struct {
 	Query   string `json:"query,omitempty" jsonschema:"text to match; empty recalls session-start memories"`
-	Project string `json:"project,omitempty" jsonschema:"optional; a directory inside this session's folder, resolved to its git root. Omit to use the session project. Recall always adds global memories"`
+	Project string `json:"project,omitempty" jsonschema:"optional; any project directory, resolved to its git root, to read what inscribe learned there. Omit to use the session project. Recall always adds global memories"`
 	Budget  int    `json:"budget,omitempty" jsonschema:"token budget, 0 to 2000 (0 uses the configured default)"`
 }
 
@@ -67,6 +67,28 @@ func New(h *inscribe.Inscribe, project string) *mcp.Server {
 	mcp.AddTool(s, &mcp.Tool{Name: "why", Description: "Show the events that evidence a memory.", Annotations: read}, whyTool(h, project))
 	mcp.AddTool(s, &mcp.Tool{Name: "feedback", Description: "Answer an inscribe feedback question: for each memory it lists, whether you used it, whether it helped, and why.", Annotations: answer}, feedbackTool(h, project))
 	return s
+}
+
+// readProject returns the project a recall reads: the server's, or the git root
+// of any directory when recall.cross_project is on. Writes always stay inside the
+// server's project (scopedProject).
+func readProject(arg, project string, cross bool) (string, error) {
+	if !cross {
+		return scopedProject(arg, project)
+	}
+	if len(arg) > maxProject {
+		return "", fmt.Errorf("project is over %d characters", maxProject)
+	}
+	if arg == "" || arg == project {
+		return project, nil
+	}
+	if !filepath.IsAbs(arg) {
+		arg = filepath.Join(project, arg)
+	}
+	if capture.ResolveProject(arg) == capture.ResolveProject(project) {
+		return project, nil
+	}
+	return capture.ResolveProject(arg), nil
 }
 
 // scopedProject returns the project a call acts on: the server's, or the git
@@ -160,7 +182,7 @@ func recallTool(h *inscribe.Inscribe, project string) mcp.ToolHandlerFor[recallI
 		if utf8.RuneCountInString(in.Query) > maxQuery {
 			return nil, nil, fmt.Errorf("query is over %d characters", maxQuery)
 		}
-		proj, err := scopedProject(in.Project, project)
+		proj, err := readProject(in.Project, project, h.RecallConfig().CrossProject > 0)
 		if err != nil {
 			return nil, nil, err
 		}

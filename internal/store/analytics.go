@@ -67,6 +67,30 @@ func (s *Store) InjectionsIn(w Window) ([]Injection, error) {
 	return out, rows.Err()
 }
 
+// SessionInjectedIDs returns the memories already injected into session, holdout rows excluded.
+func (s *Store) SessionInjectedIDs(session string) (map[string]bool, error) {
+	rows, err := s.db.Query(`SELECT memory_ids FROM injections WHERE session = ? AND holdout = 0`, session)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	seen := map[string]bool{}
+	for rows.Next() {
+		var raw string
+		var ids []string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+			return nil, err
+		}
+		for _, id := range ids {
+			seen[id] = true
+		}
+	}
+	return seen, rows.Err()
+}
+
 // SessionLineCounts counts one project's finished sessions, outcomes and injections since from.
 func (s *Store) SessionLineCounts(project string, from int64) (SessionLineCounts, error) {
 	var c SessionLineCounts
@@ -394,6 +418,104 @@ func (s *Store) SessionsIn(w Window) ([]string, error) {
 			return nil, err
 		}
 		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// MemoryOutcome is one labeled or open row of a memory being shown.
+type MemoryOutcome struct {
+	TS     int64
+	Label  int // -1 while unlabeled
+	Reason string
+}
+
+// MemoryOutcomes returns up to limit rows of the memory being shown, newest first,
+// and the totals over every row.
+func (s *Store) MemoryOutcomes(id string, limit int) (rows []MemoryOutcome, shown, helpful, unhelpful int, err error) {
+	if err = s.db.QueryRow(`SELECT count(*), coalesce(sum(label = 1), 0), coalesce(sum(label = 0), 0)
+		FROM score_outcomes WHERE memory_id = ?`, id).Scan(&shown, &helpful, &unhelpful); err != nil {
+		return nil, 0, 0, 0, err
+	}
+	r, err := s.db.Query(`SELECT ts, coalesce(label, -1), reason FROM score_outcomes
+		WHERE memory_id = ? ORDER BY ts DESC, id DESC LIMIT ?`, id, limit)
+	if err != nil {
+		return nil, 0, 0, 0, err
+	}
+	defer func() { _ = r.Close() }()
+	for r.Next() {
+		var o MemoryOutcome
+		if err = r.Scan(&o.TS, &o.Label, &o.Reason); err != nil {
+			return nil, 0, 0, 0, err
+		}
+		rows = append(rows, o)
+	}
+	return rows, shown, helpful, unhelpful, r.Err()
+}
+
+// HookRating is how the lines one hook injected were rated.
+type HookRating struct {
+	Hook                   string
+	Tokens, Helpful, Rated int
+}
+
+// HookRatings sums tokens per hook in w and joins each rated outcome to the
+// injection that showed it. Only prompt injections write outcome rows, so other
+// hooks report tokens with nothing rated.
+func (s *Store) HookRatings(w Window) ([]HookRating, error) {
+	rows, err := s.db.Query(`WITH i AS (SELECT * FROM injections
+			WHERE ts >= ? AND ts < ? AND (? = '' OR project = ?) AND holdout = 0 AND hook != 'feedback_ask'),
+		r AS (SELECT i.hook, coalesce(sum(o.label = 1), 0) helpful, count(o.id) rated FROM i
+			JOIN score_outcomes o ON o.session = i.session AND o.label IS NOT NULL
+				AND instr(i.memory_ids, '"' || o.memory_id || '"') > 0
+				AND ((o.prompt_digest = i.prompt_digest AND i.prompt_digest != '') OR o.prompt_digest = 'inj:' || i.id)
+			GROUP BY 1)
+		SELECT t.hook, t.tokens, coalesce(r.helpful, 0), coalesce(r.rated, 0)
+		FROM (SELECT hook, sum(est_tokens) tokens FROM i GROUP BY 1) t LEFT JOIN r ON r.hook = t.hook
+		ORDER BY t.tokens DESC`, w.From, w.To, w.Project, w.Project)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []HookRating
+	for rows.Next() {
+		var h HookRating
+		if err := rows.Scan(&h.Hook, &h.Tokens, &h.Helpful, &h.Rated); err != nil {
+			return nil, err
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}
+
+// ShownTally is how often one memory was injected in a window and how it was rated there.
+type ShownTally struct {
+	MemoryID              string
+	Shown, Rated, Helpful int
+}
+
+// UnhelpfulShown returns memories injected at least minShown times in w that no
+// rating in w called helpful, most shown first.
+func (s *Store) UnhelpfulShown(w Window, minShown, limit int) ([]ShownTally, error) {
+	rows, err := s.db.Query(`WITH sh AS (SELECT j.value id, count(*) n FROM injections i, json_each(i.memory_ids) j
+			WHERE i.ts >= ? AND i.ts < ? AND (? = '' OR i.project = ?) AND i.holdout = 0 AND i.hook != 'feedback_ask'
+			GROUP BY 1 HAVING count(*) >= ?),
+		o AS (SELECT memory_id id, count(*) rated, coalesce(sum(label = 1), 0) helpful FROM score_outcomes
+			WHERE ts >= ? AND ts < ? AND label IS NOT NULL GROUP BY 1)
+		SELECT sh.id, sh.n, coalesce(o.rated, 0), coalesce(o.helpful, 0)
+		FROM sh JOIN memories m ON m.id = sh.id AND m.status != 'forgotten' LEFT JOIN o ON o.id = sh.id
+		WHERE coalesce(o.helpful, 0) = 0 ORDER BY sh.n DESC, sh.id LIMIT ?`,
+		w.From, w.To, w.Project, w.Project, minShown, w.From, w.To, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []ShownTally
+	for rows.Next() {
+		var t ShownTally
+		if err := rows.Scan(&t.MemoryID, &t.Shown, &t.Rated, &t.Helpful); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
 	}
 	return out, rows.Err()
 }

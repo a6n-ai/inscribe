@@ -29,8 +29,15 @@ type Config struct {
 }
 
 type RecallCfg struct {
-	Inject          bool    `toml:"inject"`
-	SessionBudget   int     `toml:"session_budget"`
+	Inject        bool `toml:"inject"`
+	SessionBudget int  `toml:"session_budget"`
+	// SubagentBudget caps what a subagent start injects; 0 turns it off. Lines the
+	// session already showed are never sent again.
+	SubagentBudget int `toml:"subagent_budget"`
+	// CrossProject scales the score of other projects' memories in prompt recall,
+	// and lets MCP recall read another project; 0 turns both off. Global-only: a
+	// repository must not open the user's other projects to its own agent.
+	CrossProject    float64 `toml:"cross_project"`
 	PromptMaxLines  int     `toml:"prompt_max_lines"`
 	PromptThreshold float64 `toml:"prompt_threshold"`
 	HalfLifeDays    float64 `toml:"half_life_days"`
@@ -44,12 +51,14 @@ type ConsolidateCfg struct {
 }
 
 type RetentionCfg struct {
-	Mode            string `toml:"mode"`
-	PromptTextDays  int    `toml:"prompt_text_days"`
-	PromptClock     string `toml:"prompt_clock"`
-	EventDays       int    `toml:"event_days"`
-	ReplaySampleMax int    `toml:"replay_sample_max"`
-	ReplayDays      int    `toml:"replay_days"`
+	Mode           string `toml:"mode"`
+	PromptTextDays int    `toml:"prompt_text_days"`
+	PromptClock    string `toml:"prompt_clock"`
+	EventDays      int    `toml:"event_days"`
+	// TrajectoryDays keeps the normalized transcript records for this long; events stay EventDays.
+	TrajectoryDays  int `toml:"trajectory_days"`
+	ReplaySampleMax int `toml:"replay_sample_max"`
+	ReplayDays      int `toml:"replay_days"`
 }
 
 type SkillsCfg struct {
@@ -194,6 +203,10 @@ func overlayProject(c *Config, file string) ([]string, error) {
 			}
 		}
 	}
+	if p.Recall.CrossProject != c.Recall.CrossProject {
+		warns = append(warns, fmt.Sprintf("%s: ignored recall.cross_project (only your global config.toml may set it)", file))
+		p.Recall.CrossProject = c.Recall.CrossProject
+	}
 	c.Recall, c.Skills = p.Recall, p.Skills
 	c.Scrub.Patterns = union(c.Scrub.Patterns, p.Scrub.Patterns)
 	c.Exclude.Paths = union(c.Exclude.Paths, p.Exclude.Paths)
@@ -224,6 +237,13 @@ func validate(c Config) error {
 	if c.Stats.HoldoutMinSample <= 0 {
 		sampleErr = fmt.Errorf("stats.holdout_min_sample = %d: must be at least 1", c.Stats.HoldoutMinSample)
 	}
+	var crossErr error
+	if x := c.Recall.CrossProject; !(x >= 0 && x <= 1) {
+		crossErr = fmt.Errorf("recall.cross_project = %v: allowed range is 0 to 1", x)
+	}
+	if c.Retention.TrajectoryDays < 1 {
+		idleErr = errors.Join(idleErr, fmt.Errorf("retention.trajectory_days = %d: must be at least 1", c.Retention.TrajectoryDays))
+	}
 	if c.Stats.IdleMinutes < 1 {
 		idleErr = fmt.Errorf("stats.idle_minutes = %d: must be at least 1", c.Stats.IdleMinutes)
 	}
@@ -232,6 +252,7 @@ func validate(c Config) error {
 		check("retention.prompt_clock", c.Retention.PromptClock, "original", "stored"),
 		check("skills.enabled", string(c.Skills.Enabled), "auto", "true", "false"),
 		holdoutErr,
+		crossErr,
 		sampleErr,
 		idleErr,
 	)

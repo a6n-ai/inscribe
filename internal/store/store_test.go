@@ -249,8 +249,8 @@ func TestMigrateTwiceIsSafe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v != 9 {
-		t.Fatalf("schema_version = %d, want 9", v)
+	if v != 11 {
+		t.Fatalf("schema_version = %d, want 11", v)
 	}
 }
 

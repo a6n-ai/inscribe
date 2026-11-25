@@ -6,7 +6,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/a6n-ai/inscribe/internal/config"
@@ -48,7 +50,9 @@ type Query struct {
 // hit is a scored line plus the column features that produced it.
 type hit struct {
 	Line
-	feat Features
+	feat  Features
+	kind  model.ScopeKind
+	scope string
 }
 
 type Line struct {
@@ -75,6 +79,8 @@ func Recall(ctx context.Context, st *store.Store, src Source, cfg config.RecallC
 	case SessionStart:
 		filter.Limit = sessionCandidates
 		hits, err = scoreAll(src, filter, cfg, q, now, nil, nil, Facets{}, DefaultWeights())
+		// Session start already lists recent sessions; their summaries are for prompts that ask.
+		hits = slices.DeleteFunc(hits, func(h hit) bool { return h.Type == model.Session })
 		hits = trimHits(hits, firstNonZero(q.Budget, cfg.SessionBudget), 0)
 	case Prompt:
 		groups := text.Groups(q.Text)
@@ -87,10 +93,21 @@ func Recall(ctx context.Context, st *store.Store, src Source, cfg config.RecallC
 		}
 		facets := chunkPrompt(q.Text, q.Agent)
 		windows := promptWindows(groups)
-		if len(windows) == 1 {
-			hits, err = scoreAll(src, filter, cfg, q, now, groups, flatten(groups), facets, w)
-		} else {
-			hits, err = scoreWindows(ctx, src, filter, cfg, q, now, windows, facets, w)
+		score := func(f store.ListFilter, facets Facets) ([]hit, error) {
+			if len(windows) == 1 {
+				return scoreAll(src, f, cfg, q, now, groups, flatten(groups), facets, w)
+			}
+			return scoreWindows(ctx, src, f, cfg, q, now, windows, facets, w)
+		}
+		if hits, err = score(filter, facets); err != nil {
+			return nil, err
+		}
+		if cfg.CrossProject > 0 && q.Project != "" {
+			// Text only: the path and agent lookups scan every project's rows.
+			cross := func(f store.ListFilter) ([]hit, error) { return score(f, Facets{}) }
+			if hits, err = addOtherProjects(hits, filter, cfg.CrossProject, cross); err != nil {
+				return nil, err
+			}
 		}
 		hits = dropBelow(hits, cfg.PromptThreshold)
 		hits = dropRepeats(st, hits, q)
@@ -144,7 +161,7 @@ func scoreAll(src Source, f store.ListFilter, cfg config.RecallCfg, q Query, now
 				continue
 			}
 		}
-		hits = append(hits, hit{Line: Line{MemoryID: m.ID, Key: m.Key, Type: m.Type, Text: m.Text, Score: score, Repo: repoOf(m, f)}, feat: feat})
+		hits = append(hits, hit{Line: Line{MemoryID: m.ID, Key: m.Key, Type: m.Type, Text: m.Text, Score: score, Repo: repoOf(m, f)}, feat: feat, kind: m.ScopeKind, scope: m.Scope})
 	}
 	sortHits(hits)
 	return hits, nil
@@ -350,6 +367,49 @@ func dropRepeats(st *store.Store, hits []hit, q Query) []hit {
 
 // repoOf names the repository a project memory comes from, relative to a
 // workspace filter's folder, so lines from different repos can be told apart.
+// crossTypes are the memory types worth reading from another project. Commands,
+// co-changes and skill lines describe one repository and would only mislead.
+var crossTypes = map[model.MemoryType]bool{model.Note: true, model.Decision: true, model.Fix: true, model.Project: true}
+
+// addOtherProjects scores the other projects' memories for the same prompt and
+// adds the ones not already in hits, scaled by factor and labeled with their repo.
+func addOtherProjects(hits []hit, f store.ListFilter, factor float64, score func(store.ListFilter) ([]hit, error)) ([]hit, error) {
+	all := f
+	all.Project, all.Subprojects = "", false
+	// Fetch only the types worth reading across projects; commands and co-changes are most rows.
+	all.Types = nil
+	for _, t := range []model.MemoryType{model.Note, model.Decision, model.Fix, model.Project} {
+		if len(f.Types) == 0 || slices.Contains(f.Types, t) {
+			all.Types = append(all.Types, t)
+		}
+	}
+	if len(all.Types) == 0 {
+		return hits, nil
+	}
+	more, err := score(all)
+	if err != nil {
+		return nil, err
+	}
+	have := make(map[string]bool, len(hits))
+	for _, h := range hits {
+		have[h.MemoryID] = true
+	}
+	for _, h := range more {
+		if have[h.MemoryID] || h.kind == model.Global || !crossTypes[h.Type] || within(h.scope, f.Project) {
+			continue
+		}
+		h.Score *= factor
+		h.Repo = filepath.Base(h.scope)
+		hits = append(hits, h)
+	}
+	sortHits(hits)
+	return hits, nil
+}
+
+func within(path, root string) bool {
+	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
+}
+
 func repoOf(m model.Memory, f store.ListFilter) string {
 	if !f.Subprojects || m.ScopeKind != model.ProjectScope || m.Scope == f.Project {
 		return ""
