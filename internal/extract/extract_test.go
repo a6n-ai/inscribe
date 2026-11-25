@@ -153,6 +153,12 @@ func TestClassifyCommandReadsProgramsNotArguments(t *testing.T) {
 		"rg -n test src":                                   "",
 		`echo "go test" | tee out`:                         "",
 		"ls -la":                                           "",
+		"env -u X timeout 200 npx vitest run":              "test",
+		"(set -a; . .env; set +a; mvn -q test)":            "test",
+		"time cargo build":                                 "build",
+		"timeout 5 rg -n test src":                         "",
+		"python3 - <<'EOF'\ngo test ./...\nmake\nEOF":      "",
+		"cat > x.sh <<EOF\ncargo build\nEOF\ngo vet ./...": "lint",
 	}
 	for cmd, want := range cases {
 		if got := extract.ClassifyCommand(cmd); got != want {
@@ -170,6 +176,13 @@ func TestCoreCommand(t *testing.T) {
 		`CGO_ENABLED=0 go test -run=TestX -count=1 ./x && echo "go test ok"`:                                  "CGO_ENABLED=0 go test -count=1 ./x",
 		`pnpm vitest run lib/auth -t "logs in" 2>&1 | rg '^ FAIL'`:                                            "pnpm vitest run lib/auth",
 		"rg -n test src": "",
+		"env -u DATABASE_URL timeout 200 npx vitest run 2>&1 | tail":               "env -u DATABASE_URL timeout 200 npx vitest run",
+		"(set -a; . .env; set +a; mvn -q test)":                                    "mvn -q test",
+		"(set -a\n. .env\nset +a\nmvn -q test\n)":                                  "mvn -q test",
+		"cd /p/apps/web && NODE_OPTIONS=--max-old-space-size=4096 pnpm vitest run": "cd apps/web && NODE_OPTIONS=--max-old-space-size=4096 pnpm vitest run",
+		"nice -n 5 cargo build --release":                                          "nice -n 5 cargo build --release",
+		"timeout --signal=KILL 60s go test ./...":                                  "timeout --signal=KILL 60s go test ./...",
+		"env FOO=1 rg -n test src":                                                 "",
 	}
 	for cmd, want := range cases {
 		if got := extract.CoreCommand(cmd, "/p"); got != want {

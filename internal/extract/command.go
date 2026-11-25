@@ -33,7 +33,7 @@ func NormalizeCommand(cmd string) string { return strings.Join(strings.Fields(cm
 
 var (
 	quoted     = regexp.MustCompile(`"[^"]*"|'[^']*'`)
-	segmentSep = regexp.MustCompile(`&&|\|\||[;|&]`)
+	segmentSep = regexp.MustCompile(`&&|\|\||[;|&\n]`)
 	envAssign  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 )
 
@@ -48,16 +48,73 @@ var classPrograms = map[string]bool{
 	"golangci-lint": true, "tsc": true,
 }
 
+// wrappers run the command after them. Each lists its flags that take a value.
+var wrappers = map[string]map[string]bool{
+	"env":     {"-u": true, "--unset": true, "-C": true, "--chdir": true, "-S": true, "--split-string": true},
+	"timeout": {"-s": true, "--signal": true, "-k": true, "--kill-after": true},
+	"nice":    {"-n": true, "--adjustment": true},
+	"nohup":   {}, "time": {}, "command": {}, "exec": {},
+}
+
+var heredocTag = regexp.MustCompile(`<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+
+// stripHeredocs drops heredoc bodies, so their lines are never read as commands
+// once a shell line is split at newlines.
+func stripHeredocs(cmd string) string {
+	lines := strings.Split(cmd, "\n")
+	var out []string
+	for i := 0; i < len(lines); i++ {
+		out = append(out, lines[i])
+		for _, m := range heredocTag.FindAllStringSubmatch(lines[i], -1) {
+			for i+1 < len(lines) && strings.TrimSpace(lines[i+1]) != m[1] {
+				i++
+			}
+			i++ // the closing tag
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// segmentFields splits one shell segment into words, without the parens or
+// braces of a subshell or group around it.
+func segmentFields(seg string) []string {
+	return strings.Fields(strings.Trim(seg, "(){} \t\n"))
+}
+
+// programAt returns the index of the program a segment runs, past variable
+// assignments and wrappers such as env and timeout, or len(f) when there is none.
+func programAt(f []string) int {
+	i := 0
+	for i < len(f) {
+		if envAssign.MatchString(f[i]) {
+			i++
+			continue
+		}
+		name := filepath.Base(f[i])
+		valued, ok := wrappers[name]
+		if !ok {
+			return i
+		}
+		for i++; i < len(f) && strings.HasPrefix(f[i], "-"); i++ {
+			if flag, _, _ := strings.Cut(f[i], "="); valued[flag] && flag == f[i] {
+				i++
+			}
+		}
+		if name == "timeout" && i < len(f) {
+			i++ // the duration
+		}
+	}
+	return i
+}
+
 // commandHeads returns the first words of each segment of a shell line that
 // runs a class program, with quoted text removed, so a class word inside an
 // argument or a commit message never counts.
 func commandHeads(cmd string) []string {
 	var heads []string
-	for _, seg := range segmentSep.Split(quoted.ReplaceAllString(cmd, "Q"), -1) {
-		f := strings.Fields(seg)
-		for len(f) > 0 && envAssign.MatchString(f[0]) {
-			f = f[1:]
-		}
+	for _, seg := range segmentSep.Split(quoted.ReplaceAllString(stripHeredocs(cmd), "Q"), -1) {
+		f := segmentFields(seg)
+		f = f[programAt(f):]
 		if len(f) == 0 {
 			continue
 		}
@@ -98,18 +155,15 @@ var (
 // It returns "" when no segment runs a class program.
 func CoreCommand(cmd, project string) string {
 	var quotes []string
-	masked := quoted.ReplaceAllStringFunc(cmd, func(q string) string {
+	masked := quoted.ReplaceAllStringFunc(stripHeredocs(cmd), func(q string) string {
 		quotes = append(quotes, q)
 		return "\x00" + strconv.Itoa(len(quotes)-1) + "\x00"
 	})
 	dir := ""
 	var keep []string
 	for _, seg := range segmentSep.Split(redirect.ReplaceAllString(masked, ""), -1) {
-		f := strings.Fields(seg)
-		i := 0
-		for i < len(f) && envAssign.MatchString(f[i]) {
-			i++
-		}
+		f := segmentFields(seg)
+		i := programAt(f)
 		if i == len(f) {
 			continue
 		}
