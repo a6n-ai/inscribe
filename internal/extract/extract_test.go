@@ -183,6 +183,11 @@ func TestCoreCommand(t *testing.T) {
 		"nice -n 5 cargo build --release":                                          "nice -n 5 cargo build --release",
 		"timeout --signal=KILL 60s go test ./...":                                  "timeout --signal=KILL 60s go test ./...",
 		"env FOO=1 rg -n test src":                                                 "",
+		"rtk cargo test -q -p dl-engine --lib speed 2>&1 | tail -3":                "cargo test -q -p dl-engine --lib speed",
+		"cd /p && rtk bypass swift build --package-path macos":                     "swift build --package-path macos",
+		"rtk proxy go test ./x":                                                    "go test ./x",
+		"timeout 60 rtk go test ./x":                                               "timeout 60 go test ./x",
+		"rtk read README.md":                                                       "",
 	}
 	for cmd, want := range cases {
 		if got := extract.CoreCommand(cmd, "/p"); got != want {

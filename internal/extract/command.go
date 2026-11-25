@@ -5,6 +5,7 @@ import (
 	"context"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -54,6 +55,7 @@ var wrappers = map[string]map[string]bool{
 	"timeout": {"-s": true, "--signal": true, "-k": true, "--kill-after": true},
 	"nice":    {"-n": true, "--adjustment": true},
 	"nohup":   {}, "time": {}, "command": {}, "exec": {},
+	"rtk": {}, // the rtk output filter: `rtk cargo test`, `rtk bypass cargo test`
 }
 
 var heredocTag = regexp.MustCompile(`<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
@@ -102,6 +104,9 @@ func programAt(f []string) int {
 		}
 		if name == "timeout" && i < len(f) {
 			i++ // the duration
+		}
+		if name == "rtk" && i < len(f) && (f[i] == "bypass" || f[i] == "proxy") {
+			i++
 		}
 	}
 	return i
@@ -175,6 +180,17 @@ func CoreCommand(cmd, project string) string {
 		}
 		if !classPrograms[filepath.Base(f[i])] {
 			continue
+		}
+		// rtk only filters output, so the remembered command leaves it out.
+		for k := 0; k < i; k++ {
+			if filepath.Base(f[k]) != "rtk" {
+				continue
+			}
+			n := 1
+			if k+1 < i && (f[k+1] == "bypass" || f[k+1] == "proxy") {
+				n = 2
+			}
+			f, i, k = slices.Delete(f, k, k+n), i-n, k-1
 		}
 		var args []string
 		for j := 0; j < len(f); j++ {
