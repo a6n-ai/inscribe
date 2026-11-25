@@ -3,11 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/BurntSushi/toml"
@@ -311,5 +314,30 @@ func TestServeShareWritesThroughSymlink(t *testing.T) {
 	}
 	if share, _ := doc["share"].(map[string]any); share["analytics"] != true {
 		t.Fatalf("target share.analytics = %v, want true", share["analytics"])
+	}
+}
+
+func TestServeExplainsATakenPort(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_, portText, _ := net.SplitHostPort(addr)
+	port, _ := strconv.Atoi(portText)
+	var current atomic.Value // the handler serving the taken port
+	current.Store(http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("<title>Other app</title>")) })))
+	other := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { current.Load().(http.Handler).ServeHTTP(w, r) })}
+	go func() { _ = other.Serve(ln) }()
+	defer func() { _ = other.Close() }()
+	var out bytes.Buffer
+	err = serveCmd([]string{"--addr", addr}, &out)
+	if err == nil || !strings.Contains(err.Error(), "in use by another program") || !strings.Contains(err.Error(), "127.0.0.1:"+strconv.Itoa(port+1)) {
+		t.Fatalf("taken by another app: err = %v", err)
+	}
+	current.Store(newServeHandler(t.TempDir(), "127.0.0.1", port))
+	out.Reset()
+	if err := serveCmd([]string{"--addr", addr}, &out); err != nil || !strings.Contains(out.String(), "already running at http://"+addr) {
+		t.Fatalf("taken by inscribe: err = %v, out = %q", err, out.String())
 	}
 }

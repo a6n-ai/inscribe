@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -32,12 +33,32 @@ func serveCmd(args []string, stdout io.Writer) error {
 		return err
 	}
 	ln, err := net.Listen("tcp", *addr)
+	if errors.Is(err, syscall.EADDRINUSE) {
+		return addrInUse(*addr, port, stdout)
+	}
 	if err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(stdout, "serving on http://%s\n", *addr)
 	srv := &http.Server{Handler: newServeHandler(config.Home(), host, port), ReadHeaderTimeout: 10 * time.Second}
 	return srv.Serve(ln)
+}
+
+// addrInUse explains a taken port: an Inscribe dashboard already serving there
+// is reported as running (not an error); anything else names a free port to use.
+func addrInUse(addr string, port int, stdout io.Writer) error {
+	client := http.Client{Timeout: time.Second}
+	if resp, err := client.Get("http://" + addr + "/"); err == nil {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusOK && bytes.Contains(body, []byte("<title>Inscribe")) {
+			_, err := fmt.Fprintf(stdout, "inscribe serve is already running at http://%s\n", addr)
+			return err
+		}
+	}
+	host, _, _ := net.SplitHostPort(addr)
+	next := net.JoinHostPort(host, strconv.Itoa(port+1))
+	return fmt.Errorf("%s is in use by another program; run: inscribe serve --addr %s", addr, next)
 }
 
 // loopbackPort checks that addr is exactly 127.0.0.1 or ::1 with a port, and returns

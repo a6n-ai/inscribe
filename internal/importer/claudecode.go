@@ -29,6 +29,9 @@ type Options struct {
 	Root    string
 	Since   time.Time
 	Project string
+	// Progress, when set, is called after each transcript with how many of
+	// how many are done.
+	Progress func(done, total int)
 }
 
 // Summary counts what an import read and produced. Skipped counts lines that
@@ -118,9 +121,12 @@ func ClaudeCode(ctx context.Context, opts Options, sink func(context.Context, mo
 		return Summary{}, err
 	}
 	var sum Summary
-	for _, path := range files {
+	for i, path := range files {
 		if err := importFile(ctx, path, opts, sink, &sum); err != nil {
 			return sum, err
+		}
+		if opts.Progress != nil {
+			opts.Progress(i+1, len(files))
 		}
 	}
 	return sum, nil

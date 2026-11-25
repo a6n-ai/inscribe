@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -193,5 +194,44 @@ func writeTestFile(t *testing.T, path, body string) {
 	}
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestApplyReportsEachStep(t *testing.T) {
+	env, home := testEnv(t, nil, nil)
+	var out bytes.Buffer
+	env.Out = &out
+	actions := []Action{
+		{Desc: "write the config", Kind: "write-config", Files: []string{filepath.Join(home, ".inscribe", "config.toml")}, Keys: map[string]any{"retention.mode": "keep_all"}},
+		{Desc: "do something unknown", Kind: "nope"},
+	}
+	Apply(context.Background(), env, actions, (&fakeRunner{}).run)
+	got := out.String()
+	for _, want := range []string{"[1/2] write the config ...\n", "done: write the config (", "[2/2] do something unknown ...\n", `failed: do something unknown: unknown action "nope"`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("output %q is missing %q", got, want)
+		}
+	}
+}
+
+func TestImportProgress(t *testing.T) {
+	if importProgress(Env{}) != nil {
+		t.Fatal("progress without Out")
+	}
+	var out bytes.Buffer
+	p := importProgress(Env{Out: &out})
+	for i := 1; i <= 8; i++ {
+		p(i, 8)
+	}
+	want := "    1/8 transcripts (12%)\n    2/8 transcripts (25%)\n    4/8 transcripts (50%)\n    6/8 transcripts (75%)\n    8/8 transcripts (100%)\n"
+	if out.String() != want {
+		t.Fatalf("progress =\n%s\nwant\n%s", out.String(), want)
+	}
+	out.Reset()
+	live := importProgress(Env{Out: &out, Live: true})
+	live(1, 2)
+	live(2, 2)
+	if out.String() != "\r    1/2 transcripts (50%)\r    2/2 transcripts (100%)\n" {
+		t.Fatalf("live progress = %q", out.String())
 	}
 }

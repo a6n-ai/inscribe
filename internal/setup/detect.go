@@ -4,6 +4,7 @@ package setup
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -23,6 +24,10 @@ type Env struct {
 	InscribeBin string
 	LookPath    func(string) (string, error)
 	ReadFile    func(string) ([]byte, error)
+	// Out, when set, gets a line as each action starts and ends, and import
+	// progress. Live redraws the progress line in place, for a terminal.
+	Out  io.Writer
+	Live bool
 }
 
 type AgentInfo struct {

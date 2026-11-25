@@ -71,7 +71,7 @@ func setupEnv() (setup.Env, error) {
 }
 
 // isTerminal reports whether r is a terminal, not merely a character device like /dev/null.
-func isTerminal(r io.Reader) bool {
+func isTerminal(r any) bool {
 	f, ok := r.(*os.File)
 	return ok && term.IsTerminal(f.Fd())
 }
@@ -92,12 +92,13 @@ func printPlan(w io.Writer, d setup.Detected, c setup.Choices) {
 }
 
 func applySetup(stdout io.Writer, env setup.Env, d setup.Detected, c setup.Choices) (int, error) {
+	env.Out, env.Live = stdout, isTerminal(stdout)
 	rep := setup.Apply(context.Background(), env, setup.Plan(d, c), execRunner)
-	for _, a := range rep.Done {
-		fmt.Fprintln(stdout, "done:", a.Desc)
+	if len(rep.Failed) > 0 {
+		fmt.Fprintf(stdout, "%d of %d step(s) failed; fix the cause and run inscribe setup again\n", len(rep.Failed), len(rep.Failed)+len(rep.Done))
 	}
-	for _, f := range rep.Failed {
-		fmt.Fprintf(stdout, "failed: %s: %v\n", f.Action.Desc, f.Err)
+	if _, err := fmt.Fprintln(stdout, "checking the install:"); err != nil {
+		return 1, err
 	}
 	if err := doctorCmd(stdout); err != nil {
 		return 1, err
