@@ -119,7 +119,9 @@ main() {
 	[ -n "$tag" ] || fail "could not find the latest inscribe release"
 	say "version: $tag"
 
+	fresh=1
 	if [ -x "$INSTALL_DIR/inscribe" ]; then
+		fresh=0
 		case "$("$INSTALL_DIR/inscribe" version 2>/dev/null)" in
 			"inscribe ${tag#v} "*)
 				echo "inscribe $tag is already up to date in $INSTALL_DIR"
@@ -151,7 +153,9 @@ main() {
 		*":$INSTALL_DIR:"*) ;;
 		*) echo "add $INSTALL_DIR to your PATH" ;;
 	esac
-	echo "run: inscribe setup"
+	# An update keeps the hooks and MCP server setup already wrote.
+	[ "$fresh" = 1 ] && echo "run: inscribe setup"
+	return 0
 }
 
 main "$@"

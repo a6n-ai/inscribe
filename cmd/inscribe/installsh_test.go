@@ -163,8 +163,12 @@ func TestInstallShReplacesAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out, code := runInstallSh(t, env...); code != 0 {
+	out, code := runInstallSh(t, env...)
+	if code != 0 {
 		t.Fatalf("install.sh exit %d:\n%s", code, out)
+	}
+	if strings.Contains(out, "inscribe setup") {
+		t.Errorf("an update says to run inscribe setup:\n%s", out)
 	}
 	after, err := os.Stat(old)
 	if err != nil {
