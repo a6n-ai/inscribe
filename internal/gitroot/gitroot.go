@@ -24,7 +24,7 @@ func Checkout(dir string) (string, bool) {
 // repository's root. Any other root, including a submodule (a .git file with
 // no commondir) or a bare repo's worktree, is returned unchanged.
 func Main(root string) string {
-	b, err := os.ReadFile(filepath.Join(root, ".git"))
+	b, err := os.ReadFile(filepath.Join(root, ".git")) //nolint:gosec // G304: reads the .git file of a checkout found by walking up from a directory
 	if err != nil {
 		return root // a .git directory, or unreadable
 	}
@@ -36,7 +36,7 @@ func Main(root string) string {
 	if !filepath.IsAbs(gitdir) {
 		gitdir = filepath.Join(root, gitdir)
 	}
-	c, err := os.ReadFile(filepath.Join(gitdir, "commondir"))
+	c, err := os.ReadFile(filepath.Join(gitdir, "commondir")) //nolint:gosec // G304: gitdir is the path that .git file names
 	if err != nil {
 		return root
 	}
