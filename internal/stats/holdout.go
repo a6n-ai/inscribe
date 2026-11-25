@@ -66,8 +66,11 @@ type promptMeasure struct {
 	hit                       bool
 }
 
-// Compare measures holdout against normal prompts that had at least one line shown.
-func Compare(st *store.Store, w store.Window, minSample int, expected float64) (HoldoutResult, error) {
+// Compare measures holdout against normal injections of hook that had at least
+// one line. A prompt is measured to its turn end. A subagent start is measured
+// from its start to the end of the turn it ran in, since a subagent shares its
+// parent's session.
+func Compare(st *store.Store, w store.Window, hook string, minSample int, expected float64) (HoldoutResult, error) {
 	res := HoldoutResult{Expected: expected, MinSample: minSample}
 	injs, err := st.InjectionsIn(w)
 	if err != nil {
@@ -78,13 +81,22 @@ func Compare(st *store.Store, w store.Window, minSample int, expected float64) (
 		return res, err
 	}
 	byDigest := make(map[string]store.PromptRef, len(prompts))
+	bySession := map[string][]store.PromptRef{}
 	for _, p := range prompts {
 		byDigest[p.Digest] = p
+		bySession[p.Session] = append(bySession[p.Session], p)
 	}
 	var hold, norm []promptMeasure
 	for _, in := range injs {
+		if in.Hook != hook || in.LineCount == 0 {
+			continue
+		}
 		p, ok := byDigest[in.PromptDigest]
-		if in.Hook != "UserPromptSubmit" || in.LineCount == 0 || !ok {
+		if hook == "SubagentStart" {
+			p, ok = enclosingPrompt(bySession[in.Session], in.TS)
+			p.TS = in.TS
+		}
+		if !ok {
 			continue
 		}
 		m, err := measure(st, w, in, p)
@@ -116,6 +128,15 @@ func Compare(st *store.Store, w store.Window, minSample int, expected float64) (
 		res.Verdict = "inconclusive"
 	}
 	return res, nil
+}
+
+// enclosingPrompt is the last prompt at or before ts; prompts are oldest first.
+func enclosingPrompt(ps []store.PromptRef, ts int64) (store.PromptRef, bool) {
+	i, _ := slices.BinarySearchFunc(ps, ts+1, func(p store.PromptRef, t int64) int { return cmp.Compare(p.TS, t) })
+	if i == 0 {
+		return store.PromptRef{}, false
+	}
+	return ps[i-1], true
 }
 
 func measure(st *store.Store, w store.Window, in store.Injection, p store.PromptRef) (promptMeasure, error) {

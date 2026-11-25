@@ -63,6 +63,7 @@ func goldenReport() stats.Report {
 		},
 		Estimate: stats.Estimate{Hidden: true, LabeledHits: 15},
 		Holdout:  stats.HoldoutResult{State: "off"},
+		Subagent: stats.HoldoutResult{State: "off"},
 	}
 }
 
@@ -84,10 +85,10 @@ func TestStatsJSONKeys(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &top); err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
-	if len(top) != 4 {
+	if len(top) != 5 {
 		t.Fatalf("keys %v", top)
 	}
-	for _, k := range []string{"window", "measured", "estimate", "holdout"} {
+	for _, k := range []string{"window", "measured", "estimate", "holdout", "subagent_holdout"} {
 		if _, ok := top[k]; !ok {
 			t.Fatalf("missing %s in %s", k, out)
 		}
@@ -105,7 +106,7 @@ func TestStatsJSONEmptySlices(t *testing.T) {
 
 func TestStatsEmptyStore(t *testing.T) {
 	out, errOut, code := runCLI(t, t.TempDir(), "", nil, "stats", "--all", "--days", "30")
-	if code != 0 || !strings.Contains(out, "not enough data (0 labeled hits, need 30)") || !strings.Contains(out, "\nHoldout\n  off\n") {
+	if code != 0 || !strings.Contains(out, "not enough data (0 labeled hits, need 30)") || !strings.Contains(out, "\nHoldout\n  prompts: off\n  subagents: off\n") {
 		t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
 	}
 }

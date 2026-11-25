@@ -34,6 +34,9 @@ type RecallCfg struct {
 	// SubagentBudget caps what a subagent start injects; 0 turns it off. Lines the
 	// session already showed are never sent again.
 	SubagentBudget int `toml:"subagent_budget"`
+	// SubagentSkip names subagent types that get no injection, such as read-only
+	// search agents that never run the commands memories are about.
+	SubagentSkip []string `toml:"subagent_skip"`
 	// CrossProject scales the score of other projects' memories in prompt recall,
 	// and lets MCP recall read another project; 0 turns both off. Global-only: a
 	// repository must not open the user's other projects to its own agent.

@@ -104,19 +104,15 @@ type picked struct {
 }
 
 // discoveryWindow runs from the prompt that led to the memory's earliest
-// evidence to its last evidence in that session; nil when there is no evidence.
+// evidence to that evidence; nil when there is no evidence. Later evidence is
+// the lesson being reused, not found, so it does not stretch the window.
 func discoveryWindow(st *store.Store, memoryID string) (*window, error) {
 	evs, err := st.Evidence(memoryID)
 	if err != nil || len(evs) == 0 {
 		return nil, err
 	}
 	first := evs[0]
-	win := window{session: first.Session, start: first.TS}
-	for _, e := range evs {
-		if e.Session == first.Session && e.TS > win.end {
-			win.end = e.TS
-		}
-	}
+	win := window{session: first.Session, start: first.TS, end: first.TS}
 	before, err := st.EventsIn(first.Session, 0, first.TS)
 	if err != nil {
 		return nil, err

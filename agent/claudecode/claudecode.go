@@ -151,6 +151,9 @@ func (a *Adapter) Reply(event string, lines []recall.Line) []byte {
 // every prompt, so a working install is visible, and on tool events only when a
 // fix was injected, since those fire on every tool call.
 func status(event string, lines []recall.Line) string {
+	if event == "SubagentStart" {
+		return ""
+	}
 	recent, summary := 0, ""
 	for _, l := range lines {
 		if l.Type == recall.HoldoutType {
@@ -172,8 +175,6 @@ func status(event string, lines []recall.Line) string {
 		return fmt.Sprintf("inscribe: loaded %d memories, %d recent sessions%s", mems, recent, summary)
 	case event == "UserPromptSubmit":
 		return fmt.Sprintf("inscribe: recalled %d memories for this prompt", mems)
-	case event == "SubagentStart":
-		return ""
 	case mems == 0:
 		return ""
 	}

@@ -19,6 +19,7 @@ const (
 var keptKeys = map[string]bool{
 	"command": true, "exit_code": true, "path": true, "paths": true, "skill": true,
 	"error": true, "rule": true, "text": true, "type": true, "scope": true, "confidence": true,
+	"agent_type": true,
 }
 
 // ApplyPolicy enforces Inscribe's storage limits on e in place.

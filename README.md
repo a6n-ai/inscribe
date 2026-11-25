@@ -148,6 +148,7 @@ Recall settings in `[recall]` beyond the budgets:
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `subagent_budget` | `80` | Token budget for a subagent start; `0` is off. Lines the session already showed are never repeated. |
+| `subagent_skip` | `["Explore", "Plan", "claude-code-guide", "statusline-setup", "web-fetch"]` | Subagent types that get no injection. Each subagent injection records its type. |
 | `cross_project` | `0.6` | Score scale for notes, decisions, fixes and project facts from your other projects on a prompt, and lets MCP `recall` read another project; `0` keeps recall inside the current project. Only the global `config.toml` may set it. |
 
 `inscribe mcp` serves `remember`, `recall`, `forget`, `why` and `feedback` for the project it
@@ -234,13 +235,15 @@ What the numbers mean:
   get no injection, and the report compares them with the rest. The verdict is
   `consistent`, `contradicted` or `inconclusive`. The net (saved minus injected)
   is shown only when the verdict is `consistent`.
+  Subagent starts are held out at the same rate and compared on their own line,
+  each measured over the rest of the turn it ran in.
 
 The `[stats]` keys, in the global `config.toml` only:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `session_line` | `true` | Show the one-line summary at session start. |
-| `holdout` | `0` | Fraction of prompts held out from injection, `0` to `0.5`; `0` is off. |
+| `holdout` | `0` | Fraction of prompts and subagent starts held out from injection, `0` to `0.5`; `0` is off. |
 | `holdout_min_sample` | `100` | Held-out prompts needed before a verdict. |
 | `idle_minutes` | `5` | Gap that ends active time in a session. |
 

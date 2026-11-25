@@ -3,7 +3,7 @@ package config
 // Defaults returns the shipped configuration.
 func Defaults() Config {
 	return Config{
-		Recall:      RecallCfg{Inject: true, SessionBudget: 400, SubagentBudget: 80, CrossProject: 0.6, PromptMaxLines: 3, PromptThreshold: 0.35, HalfLifeDays: 30},
+		Recall:      RecallCfg{Inject: true, SessionBudget: 400, SubagentBudget: 80, SubagentSkip: []string{"Explore", "Plan", "claude-code-guide", "statusline-setup", "web-fetch"}, CrossProject: 0.6, PromptMaxLines: 3, PromptThreshold: 0.35, HalfLifeDays: 30},
 		Consolidate: ConsolidateCfg{Auto: true, MinEvents: 20, InputBudget: 8000, Model: map[string]string{"claude-code": "haiku"}},
 		Retention:   RetentionCfg{Mode: "rolling", PromptTextDays: 30, PromptClock: "original", EventDays: 180, TrajectoryDays: 30, ReplaySampleMax: 20000, ReplayDays: 0},
 		Skills:      SkillsCfg{Enabled: "auto", Enrich: []string{}},

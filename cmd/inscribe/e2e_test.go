@@ -149,7 +149,7 @@ func TestSubagentStartRecall(t *testing.T) {
 	for range 3 {
 		hookOK(t, home, bashPayload("PostToolUse", "s1", proj, "go test ./...", ""), "PostToolUse")
 	}
-	in := map[string]any{"session_id": "s1", "cwd": proj, "hook_event_name": "SubagentStart", "agent_id": "a1", "agent_type": "Explore"}
+	in := map[string]any{"session_id": "s1", "cwd": proj, "hook_event_name": "SubagentStart", "agent_id": "a1", "agent_type": "general-purpose"}
 	ctx := additionalContext(t, hookOK(t, home, in, "SubagentStart"))
 	if !strings.Contains(ctx, "[command] tests: go test ./...") || strings.Contains(ctx, "recent") {
 		t.Fatalf("additionalContext = %q", ctx)
@@ -165,7 +165,7 @@ func TestSubagentStartSkipsLinesTheSessionShowed(t *testing.T) {
 	if !strings.Contains(start, "go test ./...") {
 		t.Fatalf("session start = %q", start)
 	}
-	in := map[string]any{"session_id": "s1", "cwd": proj, "hook_event_name": "SubagentStart", "agent_id": "a1", "agent_type": "Explore"}
+	in := map[string]any{"session_id": "s1", "cwd": proj, "hook_event_name": "SubagentStart", "agent_id": "a1", "agent_type": "general-purpose"}
 	if out := hookOK(t, home, in, "SubagentStart"); strings.Contains(out, "go test ./...") {
 		t.Fatalf("subagent repeated a line its session showed: %q", out)
 	}
@@ -180,6 +180,21 @@ func TestSubagentStartSkipsLinesTheSessionShowed(t *testing.T) {
 	}
 }
 
+func TestSubagentSkipTypeInjectsNothing(t *testing.T) {
+	home, proj := t.TempDir(), t.TempDir()
+	for range 3 {
+		hookOK(t, home, bashPayload("PostToolUse", "s1", proj, "go test ./...", ""), "PostToolUse")
+	}
+	in := map[string]any{"session_id": "s1", "cwd": proj, "hook_event_name": "SubagentStart", "agent_id": "a1", "agent_type": "Explore"}
+	if out := hookOK(t, home, in, "SubagentStart"); strings.Contains(out, "go test ./...") {
+		t.Fatalf("a skipped subagent type still got lines: %q", out)
+	}
+	in["agent_type"] = "general-purpose"
+	if ctx := additionalContext(t, hookOK(t, home, in, "SubagentStart")); !strings.Contains(ctx, "go test ./...") {
+		t.Fatalf("an unskipped type got = %q", ctx)
+	}
+}
+
 func TestSubagentBudgetZeroInjectsNothing(t *testing.T) {
 	home, proj := t.TempDir(), t.TempDir()
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte("[recall]\nsubagent_budget = 0\n"), 0o600); err != nil {
@@ -188,7 +203,7 @@ func TestSubagentBudgetZeroInjectsNothing(t *testing.T) {
 	for range 3 {
 		hookOK(t, home, bashPayload("PostToolUse", "s1", proj, "go test ./...", ""), "PostToolUse")
 	}
-	in := map[string]any{"session_id": "s1", "cwd": proj, "hook_event_name": "SubagentStart", "agent_id": "a1", "agent_type": "Explore"}
+	in := map[string]any{"session_id": "s1", "cwd": proj, "hook_event_name": "SubagentStart", "agent_id": "a1", "agent_type": "general-purpose"}
 	if out := hookOK(t, home, in, "SubagentStart"); strings.Contains(out, "go test ./...") {
 		t.Fatalf("subagent_budget = 0 still injected: %q", out)
 	}

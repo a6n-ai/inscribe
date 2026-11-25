@@ -18,4 +18,5 @@ Estimated
   not enough data (15 labeled hits, need 30)
 
 Holdout
-  off
+  prompts: off
+  subagents: off

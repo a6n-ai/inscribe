@@ -90,9 +90,10 @@ func runHook(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	q, ok := hookQuery(e, h.Scrub)
 	subagent := e.Kind == model.SubagentStart
+	agentType, _ := e.Payload["agent_type"].(string)
 	if subagent {
 		q.Budget = h.RecallConfig().SubagentBudget
-		ok = ok && q.Budget > 0
+		ok = ok && q.Budget > 0 && !slices.Contains(h.RecallConfig().SubagentSkip, agentType)
 	}
 	if !ok {
 		out, asked := askFeedback(ctx, h, ad, event, e, saved, nil)
@@ -100,8 +101,11 @@ func runHook(args []string, stdin io.Reader, stdout io.Writer) error {
 		return writeDebug(stdout, h, ad, event, e, out, nil, saved, asked)
 	}
 	heldOut := false
-	if q.Mode == recall.Prompt && q.Session != "" {
-		if share := h.StatsConfig().Holdout; share > 0 {
+	if share := h.StatsConfig().Holdout; share > 0 {
+		switch {
+		case subagent && e.Session != "":
+			heldOut = stats.Draw(e.Session, e.Digest, 0, share)
+		case q.Mode == recall.Prompt && q.Session != "":
 			idx, err := h.PromptIndex(e.Session, e.TS)
 			if err != nil {
 				logLine(config.Home(), "prompt index: %v", err)
@@ -157,6 +161,8 @@ func runHook(args []string, stdin io.Reader, stdout io.Writer) error {
 			in.PromptDigest = e.Digest
 		case model.PostTool:
 			in.Tool = e.Tool
+		case model.SubagentStart:
+			in.Tool = agentType
 		}
 		if err := h.RecordInjection(ctx, in); err != nil {
 			logLine(config.Home(), "record injection: %v", err)

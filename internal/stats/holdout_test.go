@@ -85,7 +85,7 @@ func compareSeeded(t *testing.T, holdoutAt, normalAt func(int) int, minSample in
 	e := newEnv(t)
 	wbSeed(t, e, 40, true, holdoutAt, "m")
 	wbSeed(t, e, 40, false, normalAt, "m")
-	res, err := Compare(e.st, store.Window{From: 0, To: 1 << 40}, minSample, expected)
+	res, err := Compare(e.st, store.Window{From: 0, To: 1 << 40}, "UserPromptSubmit", minSample, expected)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestCompareCollecting(t *testing.T) {
 	e := newEnv(t)
 	wbSeed(t, e, 37, true, alt(1, 2), "m")
 	wbSeed(t, e, 410, false, alt(1, 2), "m")
-	res, err := Compare(e.st, wide, 100, 50)
+	res, err := Compare(e.st, wide, "UserPromptSubmit", 100, 50)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,8 +141,8 @@ func TestCompareRepeatable(t *testing.T) {
 	e := newEnv(t)
 	wbSeed(t, e, 40, true, alt(1300, 1700), "m")
 	wbSeed(t, e, 40, false, alt(1000, 1200), "m")
-	a, _ := Compare(e.st, wide, 20, 300)
-	b, _ := Compare(e.st, wide, 20, 300)
+	a, _ := Compare(e.st, wide, "UserPromptSubmit", 20, 300)
+	b, _ := Compare(e.st, wide, "UserPromptSubmit", 20, 300)
 	if a.Lo != b.Lo || a.Hi != b.Hi || a.Lo == a.Hi {
 		t.Fatalf("a=%+v b=%+v", a, b)
 	}
@@ -169,7 +169,7 @@ func TestCompareMeasures(t *testing.T) {
 		t.Fatal(err)
 	}
 	wbSeed(t, e, 2, false, alt(10, 10), memID)
-	res, err := Compare(e.st, wide, 100, 0)
+	res, err := Compare(e.st, wide, "UserPromptSubmit", 100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,5 +199,42 @@ func TestWouldBeHit(t *testing.T) {
 		if got := WouldBeHit(c.cmds, c.key, c.line); got != c.want {
 			t.Errorf("WouldBeHit(%v, %q, %q) = %v, want %v", c.cmds, c.key, c.line, got, c.want)
 		}
+	}
+}
+
+func TestCompareSubagentMeasuresFromStart(t *testing.T) {
+	e := newEnv(t)
+	err := e.st.Write(context.Background(), func(tx *store.Tx) error {
+		for i, holdout := range []bool{true, false} {
+			sess := fmt.Sprint("sub", i)
+			for _, ev := range []model.Event{
+				{TS: 1000, Session: sess, Kind: model.Prompt, Digest: sess + "-p"},
+				{TS: 1010, Session: sess, Kind: model.TurnEnd, Digest: sess + "-t"},
+			} {
+				ev.Agent, ev.Project = "claude-code", "p"
+				if _, err := tx.InsertEvent(&ev); err != nil {
+					return err
+				}
+			}
+			turns := []store.UsageTurn{{Session: sess, MessageID: "before", TS: 1001, Output: 5000}, {Session: sess, MessageID: "in", TS: 1005, Output: 100 * (i + 1)}}
+			if _, err := tx.UpsertUsageTurns(turns); err != nil {
+				return err
+			}
+			if err := tx.InsertInjection(store.InjectionInput{TS: 1003, Session: sess, Agent: "claude-code", Project: "p", Hook: "SubagentStart",
+				Tool: "general-purpose", LineCount: 1, MemoryIDs: []string{"m"}, Holdout: holdout}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := Compare(e.st, wide, "SubagentStart", 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Holdout.N != 1 || res.Normal.N != 1 || res.Holdout.MeanTokens != 100 || res.Normal.MeanTokens != 200 {
+		t.Fatalf("got %+v, want 1 vs 1 at 100 and 200 tokens", res)
 	}
 }

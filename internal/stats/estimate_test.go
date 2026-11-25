@@ -119,6 +119,20 @@ func TestCreditEarliestSession(t *testing.T) {
 	}
 }
 
+func TestCreditEndsAtFirstEvidence(t *testing.T) {
+	e := newEnv(t)
+	e.event(t, "s", 1000, model.Prompt)
+	e1 := e.event(t, "s", 2000, model.PostTool)
+	e2 := e.event(t, "s", 50000, model.PostTool)
+	m := e.memory(t, "k", e1, e2)
+	e.usage(t, "s", store.UsageTurn{TS: 1500, Input: 100}, store.UsageTurn{TS: 40000, Input: 9000})
+	e.hit(t, m, "h", "agent", 90000)
+	got, _ := credit(t, e)
+	if len(got) != 1 || got[0].Tokens != 100 {
+		t.Fatalf("got %+v, want tokens 100: later evidence must not widen the window", got)
+	}
+}
+
 func TestCreditExcludesCacheRead(t *testing.T) {
 	e := newEnv(t)
 	e.event(t, "s", 1000, model.Prompt)

@@ -79,6 +79,8 @@ type Report struct {
 	Measured Measured      `json:"measured"`
 	Estimate Estimate      `json:"estimate"`
 	Holdout  HoldoutResult `json:"holdout"`
+	// Subagent is the holdout of subagent-start injections, measured apart from prompts.
+	Subagent HoldoutResult `json:"subagent_holdout"`
 }
 
 var sourceOfReason = map[string]string{
@@ -185,9 +187,14 @@ func Build(st *store.Store, w store.Window, cfg config.StatsCfg, now time.Time) 
 		}
 	}
 	if cfg.Holdout == 0 && holdoutRows == 0 {
-		r.Holdout = HoldoutResult{State: "off"}
-	} else if r.Holdout, err = Compare(st, w, cfg.HoldoutMinSample, expected); err != nil {
-		return r, err
+		r.Holdout, r.Subagent = HoldoutResult{State: "off"}, HoldoutResult{State: "off"}
+	} else {
+		if r.Holdout, err = Compare(st, w, "UserPromptSubmit", cfg.HoldoutMinSample, expected); err != nil {
+			return r, err
+		}
+		if r.Subagent, err = Compare(st, w, "SubagentStart", cfg.HoldoutMinSample, 0); err != nil {
+			return r, err
+		}
 	}
 	if r.Holdout.Verdict == "consistent" {
 		net := e.HiTokens - e.InjectedTokens
@@ -498,14 +505,23 @@ func Text(r Report, explain bool) string {
 		}
 	}
 
-	h := r.Holdout
 	b.WriteString("\nHoldout\n")
+	holdoutText(&b, line, "prompts", r.Holdout)
+	holdoutText(&b, line, "subagents", r.Subagent)
+
+	if explain {
+		b.WriteString(explainText)
+	}
+	return b.String()
+}
+
+func holdoutText(b *strings.Builder, line func(string, string, ...any), name string, h HoldoutResult) {
 	switch h.State {
 	case "collecting":
-		fmt.Fprintf(&b, "  collecting, %d of %d holdout · %d of %d normal\n", h.Holdout.N, h.MinSample, h.Normal.N, h.MinSample)
+		fmt.Fprintf(b, "  %s: collecting, %d of %d holdout · %d of %d normal\n", name, h.Holdout.N, h.MinSample, h.Normal.N, h.MinSample)
 	case "compared":
-		fmt.Fprintf(&b, "  holdout %d · normal %d · tokens %s (95%% %s to %s) · expected %s · %s\n",
-			h.Holdout.N, h.Normal.N, stokf(h.Diff), tokf(h.Lo), tokf(h.Hi), stokf(h.Expected), h.Verdict)
+		fmt.Fprintf(b, "  %s: holdout %d · normal %d · tokens %s (95%% %s to %s) · expected %s · %s\n",
+			name, h.Holdout.N, h.Normal.N, stokf(h.Diff), tokf(h.Lo), tokf(h.Hi), stokf(h.Expected), h.Verdict)
 		for _, g := range []struct {
 			name string
 			s    GroupStats
@@ -513,13 +529,8 @@ func Text(r Report, explain bool) string {
 			line(g.name, "failed %.2f · corrections %.2f · would-be-hit %d%%", g.s.FailedPerPrompt, g.s.CorrectionsPerPrompt, int(math.Round(g.s.WouldBeHitRate*100)))
 		}
 	default:
-		b.WriteString("  off\n")
+		fmt.Fprintf(b, "  %s: off\n", name)
 	}
-
-	if explain {
-		b.WriteString(explainText)
-	}
-	return b.String()
 }
 
 const explainText = `
@@ -534,4 +545,5 @@ How to read the estimate
   - Shared windows: credit is split among memories that hit in this report window, so the same memory can show more credit in a shorter window.
 Holdout limits
   Prompts in one session are not independent, and session-start lines stay in context across holdout prompts. The interval treats prompts as independent, so it is narrower than the truth.
+  A subagent is measured over the rest of the turn it ran in, which also holds the parent's own work.
 `
