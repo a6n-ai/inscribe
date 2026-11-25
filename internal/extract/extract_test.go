@@ -188,6 +188,17 @@ func TestCoreCommand(t *testing.T) {
 		"rtk proxy go test ./x":                                                    "go test ./x",
 		"timeout 60 rtk go test ./x":                                               "timeout 60 go test ./x",
 		"rtk read README.md":                                                       "",
+		"[REDACTED:high_entropy] ./node_modules/.bin/tsc --noEmit 2>&1":            "./node_modules/.bin/tsc --noEmit",
+		"for f in a b; do go test ./x; done":                                       "go test ./x",
+		"T() { cargo test -q; }":                                                   "cargo test -q",
+		"if go vet ./...; then echo ok; fi":                                        "go vet ./...",
+		"xargs -0 pnpm exec vitest run":                                            "xargs -0 pnpm exec vitest run",
+		"sudo cargo build --release":                                               "sudo cargo build --release",
+		"mise exec -- go test ./...":                                               "mise exec -- go test ./...",
+		"which go cargo":                                                           "",
+		"rm -f bin/golangci-lint":                                                  "",
+		"pgrep -fl vitest":                                                         "",
+		"for p in go cargo; do echo $p; done":                                      "",
 	}
 	for cmd, want := range cases {
 		if got := extract.CoreCommand(cmd, "/p"); got != want {

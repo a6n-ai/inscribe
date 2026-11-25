@@ -55,7 +55,59 @@ var wrappers = map[string]map[string]bool{
 	"timeout": {"-s": true, "--signal": true, "-k": true, "--kill-after": true},
 	"nice":    {"-n": true, "--adjustment": true},
 	"nohup":   {}, "time": {}, "command": {}, "exec": {},
-	"rtk": {}, // the rtk output filter: `rtk cargo test`, `rtk bypass cargo test`
+	"xargs": {"-n": true, "-I": true, "-P": true, "-L": true, "-s": true, "-d": true, "-E": true},
+}
+
+// consumers take a program name as data (which go, pgrep vitest, brew install
+// go), so a class program after them is never run.
+var consumers = map[string]bool{
+	"which": true, "whereis": true, "type": true, "man": true, "help": true, "tldr": true,
+	"pgrep": true, "pkill": true, "killall": true, "kill": true, "echo": true, "printf": true,
+	"ls": true, "rg": true, "grep": true, "fd": true, "find": true, "cat": true, "head": true, "tail": true,
+	"du": true, "brew": true, "git": true, "apt": true, "apt-get": true, "port": true,
+	"for": true, "case": true, "select": true, // for p in go cargo: names in a list
+}
+
+var (
+	programName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]*$`)
+	funcHead    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*\(\)\{?$`)
+)
+
+// filler words run nothing themselves: shell keywords, a function head such as
+// T() {, and the placeholder the scrubber leaves for a secret-looking word.
+func filler(w string) bool {
+	switch w {
+	case "do", "then", "else", "if", "while", "until", "!", "{":
+		return true
+	}
+	return funcHead.MatchString(w) || strings.HasPrefix(w, "[REDACTED:")
+}
+
+// outputFilters only shape what a command prints, so the remembered command
+// leaves them out: `rtk cargo test` is remembered as `cargo test`.
+var outputFilters = map[string]bool{"rtk": true}
+
+// wrappedAt reads an unknown program as a wrapper (rtk, sudo, caffeinate, mise
+// exec --) when a class program follows it within a few words, so a plugin
+// that runs commands is understood without being listed. It returns the class
+// program's index, or i when f[i] is not such a wrapper.
+func wrappedAt(f []string, i int) int {
+	name := filepath.Base(f[i])
+	if classPrograms[name] || consumers[name] || !programName.MatchString(f[i]) {
+		return i
+	}
+	for j, bare := i+1, 0; j < len(f); j++ {
+		switch {
+		case classPrograms[f[j]]: // a bare name; rm bin/golangci-lint names a file
+			return j
+		case strings.HasPrefix(f[j], "-"):
+		case bare < 2: // a subcommand or its value: rtk bypass, mise exec, op run
+			bare++
+		default:
+			return i
+		}
+	}
+	return i
 }
 
 var heredocTag = regexp.MustCompile(`<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
@@ -88,13 +140,17 @@ func segmentFields(seg string) []string {
 func programAt(f []string) int {
 	i := 0
 	for i < len(f) {
-		if envAssign.MatchString(f[i]) {
+		if envAssign.MatchString(f[i]) || filler(f[i]) {
 			i++
 			continue
 		}
 		name := filepath.Base(f[i])
 		valued, ok := wrappers[name]
 		if !ok {
+			if j := wrappedAt(f, i); j > i {
+				i = j
+				continue
+			}
 			return i
 		}
 		for i++; i < len(f) && strings.HasPrefix(f[i], "-"); i++ {
@@ -104,9 +160,6 @@ func programAt(f []string) int {
 		}
 		if name == "timeout" && i < len(f) {
 			i++ // the duration
-		}
-		if name == "rtk" && i < len(f) && (f[i] == "bypass" || f[i] == "proxy") {
-			i++
 		}
 	}
 	return i
@@ -181,17 +234,7 @@ func CoreCommand(cmd, project string) string {
 		if !classPrograms[filepath.Base(f[i])] {
 			continue
 		}
-		// rtk only filters output, so the remembered command leaves it out.
-		for k := 0; k < i; k++ {
-			if filepath.Base(f[k]) != "rtk" {
-				continue
-			}
-			n := 1
-			if k+1 < i && (f[k+1] == "bypass" || f[k+1] == "proxy") {
-				n = 2
-			}
-			f, i, k = slices.Delete(f, k, k+n), i-n, k-1
-		}
+		f, i = dropNoise(f, i)
 		var args []string
 		for j := 0; j < len(f); j++ {
 			name, _, _ := strings.Cut(f[j], "=")
@@ -299,4 +342,26 @@ func (commandX) Extract(_ context.Context, e *model.Event, tx *store.Tx, _ confi
 	m := projectMemory(e, model.Command, key, classLabel[class]+": "+cmp.Or(CoreCommand(cmd, e.Project), cmd), map[string]any{"class": class}, model.Active)
 	_, err := tx.UpsertMemory(m, nil, e.ID)
 	return err
+}
+
+// dropNoise removes the words before the program at i that the remembered
+// command should not keep: filler, and output filters with their subcommand
+// (rtk bypass). It returns the words and the program's new index.
+func dropNoise(f []string, i int) ([]string, int) {
+	for k := 0; k < i; k++ {
+		n := 0
+		switch {
+		case filler(f[k]):
+			n = 1
+		case outputFilters[filepath.Base(f[k])]:
+			n = 1
+			for n < i-k && !strings.HasPrefix(f[k+n], "-") && !envAssign.MatchString(f[k+n]) && f[k+n] != f[i] {
+				n++ // its subcommand words, up to the program or a flag
+			}
+		}
+		if n > 0 {
+			f, i, k = slices.Delete(slices.Clone(f), k, k+n), i-n, k-1
+		}
+	}
+	return f, i
 }
