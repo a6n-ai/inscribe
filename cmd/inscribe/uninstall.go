@@ -48,7 +48,7 @@ func uninstallCmd(args []string, stdout io.Writer) error {
 		}
 		errs = append(errs, removeHooks(ad, path, stdout))
 	}
-	errs = append(errs, removeMCP(stdout))
+	errs = append(errs, removeMCP(stdout), serviceCmd("uninstall", defaultServeAddr, stdout))
 	if *purge {
 		errs = append(errs, purgeData(stdout))
 	} else {

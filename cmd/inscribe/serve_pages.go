@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"html/template"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -282,6 +283,103 @@ func serveMemory(w http.ResponseWriter, r *http.Request, home string) {
 		return
 	}
 	render(w, "memory", page)
+}
+
+const sessionListMax = 100
+
+// sessionIdle is how long an open session can go quiet before the page calls it idle.
+const sessionIdle = 30 * time.Minute
+
+type sessionItem struct {
+	store.SessionRow
+	State string
+}
+
+// sessionState is "closed" once the session ended, "open" while it had an event
+// in the last sessionIdle, and "idle" when it went quiet without a SessionEnd.
+func sessionState(r store.SessionRow, now time.Time) string {
+	switch {
+	case r.Ended != 0:
+		return "closed"
+	case now.Sub(time.UnixMilli(r.LastEvent)) < sessionIdle:
+		return "open"
+	default:
+		return "idle"
+	}
+}
+
+type sessionsPage struct {
+	Rows             []sessionItem
+	Open, Idle, Done int
+}
+
+func serveSessions(w http.ResponseWriter, _ *http.Request, home string) {
+	h, ok := openStore(w, home)
+	if !ok {
+		return
+	}
+	defer func() { _ = h.Close() }()
+	rows, err := h.SessionRows(sessionListMax)
+	if err != nil {
+		http.Error(w, "the sessions do not load", http.StatusInternalServerError)
+		return
+	}
+	var page sessionsPage
+	now := time.Now()
+	for _, r := range rows {
+		it := sessionItem{r, sessionState(r, now)}
+		switch it.State {
+		case "open":
+			page.Open++
+		case "idle":
+			page.Idle++
+		default:
+			page.Done++
+		}
+		page.Rows = append(page.Rows, it)
+	}
+	render(w, "sessions", page)
+}
+
+type sessionPage struct {
+	S               sessionItem
+	Captured, Shown []*model.Memory
+}
+
+func serveSession(w http.ResponseWriter, r *http.Request, home string) {
+	h, ok := openStore(w, home)
+	if !ok {
+		return
+	}
+	defer func() { _ = h.Close() }()
+	row, err := h.SessionByID(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "no such session", http.StatusNotFound)
+		return
+	}
+	page := sessionPage{S: sessionItem{row, sessionState(row, time.Now())}}
+	captured, err := h.SessionCaptured(row.ID)
+	if err != nil {
+		http.Error(w, "the captured memories do not load", http.StatusInternalServerError)
+		return
+	}
+	shown, err := h.SessionInjectedIDs(row.ID)
+	if err != nil {
+		http.Error(w, "the shown memories do not load", http.StatusInternalServerError)
+		return
+	}
+	// A purged memory has no row left; it drops out of both lists.
+	for _, id := range captured {
+		if m, err := h.GetMemory(id); err == nil {
+			page.Captured = append(page.Captured, m)
+		}
+	}
+	for _, id := range slices.Sorted(maps.Keys(shown)) {
+		if m, err := h.GetMemory(id); err == nil {
+			page.Shown = append(page.Shown, m)
+		}
+	}
+	render(w, "session", page)
 }
 
 type discoverRow struct {
@@ -645,5 +743,5 @@ func eventText(e model.Event) string {
 }
 
 var pages = template.Must(template.New("").Funcs(template.FuncMap{
-	"when": when, "pct": pct, "add": func(a, b int) int { return a + b }, "div": func(a, b int) int { return a / b }, "list": func(xs ...string) []string { return xs }, "short": short, "mb": mb, "eventText": eventText,
+	"when": when, "pct": pct, "add": func(a, b int) int { return a + b }, "div": func(a, b int) int { return a / b }, "list": func(xs ...string) []string { return xs }, "short": short, "base": filepath.Base, "mb": mb, "eventText": eventText,
 }).Parse(pageTemplates))

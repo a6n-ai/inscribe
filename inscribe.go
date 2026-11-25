@@ -442,6 +442,19 @@ func (h *Inscribe) SessionInjectedIDs(session string) (map[string]bool, error) {
 	return h.store.SessionInjectedIDs(session)
 }
 
+// SessionRows lists up to limit sessions, newest activity first.
+func (h *Inscribe) SessionRows(limit int) ([]store.SessionRow, error) {
+	return h.store.SessionRows(limit)
+}
+
+// SessionByID returns one session's row.
+func (h *Inscribe) SessionByID(id string) (store.SessionRow, error) { return h.store.SessionByID(id) }
+
+// SessionCaptured returns the memories session's events are evidence for.
+func (h *Inscribe) SessionCaptured(session string) ([]string, error) {
+	return h.store.SessionCaptured(session)
+}
+
 // window is the last days days, across every project.
 func window(days int) store.Window {
 	now := time.Now()

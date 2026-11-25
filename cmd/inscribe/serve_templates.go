@@ -42,7 +42,7 @@ ol li, ul li { margin: 0.3rem 0; }
 </style>
 </head>
 <body>
-<nav><b>Inscribe</b><a href="/">Overview</a><a href="/recall">Recall</a><a href="/memories">Memories</a><a href="/discover">Discover</a><a href="/how">How it works</a><a href="/settings">Settings</a></nav>
+<nav><b>Inscribe</b><a href="/">Overview</a><a href="/recall">Recall</a><a href="/memories">Memories</a><a href="/sessions">Sessions</a><a href="/discover">Discover</a><a href="/how">How it works</a><a href="/settings">Settings</a></nav>
 {{end}}
 
 {{define "foot"}}</body>
@@ -167,6 +167,42 @@ ol li, ul li { margin: 0.3rem 0; }
 {{template "foot"}}{{end}}
 
 {{define "ratebuttons"}}<button type="submit" name="answer" value="yes" formaction="/memories/{{.}}/rate">helpful</button> <button type="submit" name="answer" value="no" formaction="/memories/{{.}}/rate">not helpful</button> <button class="danger" type="submit" name="answer" value="wrong" formaction="/memories/{{.}}/rate">wrong</button>{{end}}
+
+{{define "sessions"}}{{template "head" "Sessions"}}
+<h1>Sessions</h1>
+<p class="mute">{{.Open}} open · {{.Idle}} idle · {{.Done}} closed, newest {{len .Rows}} shown. Idle means no event for 30 minutes and no session end yet; inscribe closes it at the next catch-up.</p>
+<table><tr><th>state</th><th>project</th><th>agent</th><th>started</th><th>last event</th><th class="num">events</th><th class="num">memories captured</th><th class="num">lines shown</th><th class="num">tokens</th></tr>
+{{range .Rows}}<tr><td>{{template "sessionstate" .State}}</td><td><a href="/sessions/{{.ID}}">{{base .Project}}</a><div class="mono mute">{{short .ID 12}}</div></td><td>{{.Agent}}</td><td>{{when .Started}}</td><td>{{when .LastEvent}}</td><td class="num">{{.Events}}</td><td class="num">{{.Captured}}</td><td class="num">{{.Shown}}</td><td class="num">{{.Tokens}}</td></tr>
+{{else}}<tr><td colspan="9" class="mute">no sessions captured yet</td></tr>{{end}}</table>
+{{template "foot"}}{{end}}
+
+{{define "sessionstate"}}{{if eq . "open"}}<span class="good">open</span>{{else if eq . "idle"}}<span class="mute">idle</span>{{else}}closed{{end}}{{end}}
+
+{{define "session"}}{{template "head" "Session"}}
+<p><a href="/sessions">← Sessions</a></p>
+<h1>{{base .S.Project}} · {{template "sessionstate" .S.State}}</h1>
+<table>
+<tr><th>id</th><td class="mono">{{.S.ID}}</td></tr>
+<tr><th>project</th><td class="mono">{{.S.Project}}</td></tr>
+<tr><th>agent</th><td>{{.S.Agent}}</td></tr>
+<tr><th>started / last event</th><td>{{when .S.Started}} / {{when .S.LastEvent}}</td></tr>
+<tr><th>ended</th><td>{{when .S.Ended}}</td></tr>
+<tr><th>events</th><td>{{.S.Events}}</td></tr>
+<tr><th>injected</th><td>{{.S.Shown}} lines, {{.S.Tokens}} tokens</td></tr>
+</table>
+
+<h2>Memories captured</h2>
+<p class="mute">Memories this session's events are evidence for, new or reinforced, in the order the session supported them.</p>
+{{template "memtable" .Captured}}
+
+<h2>Memories shown</h2>
+<p class="mute">Memories inscribe injected into this session, holdout rows excluded.</p>
+{{template "memtable" .Shown}}
+{{template "foot"}}{{end}}
+
+{{define "memtable"}}<table><tr><th>memory</th><th>type</th><th>status</th></tr>
+{{range .}}<tr><td><a href="/memories/{{.ID}}">{{short .Key 70}}</a><div class="mute">{{short .Text 140}}</div></td><td>{{.Type}}</td><td>{{.Status}}</td></tr>
+{{else}}<tr><td colspan="3" class="mute">none</td></tr>{{end}}</table>{{end}}
 
 {{define "discover"}}{{template "head" "Discover"}}
 <h1>Shown often, never helpful</h1>

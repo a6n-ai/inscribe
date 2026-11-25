@@ -23,10 +23,17 @@ import (
 const defaultServeAddr = "127.0.0.1:7331"
 
 func serveCmd(args []string, stdout io.Writer) error {
+	action := ""
+	if len(args) > 0 && (args[0] == "install" || args[0] == "uninstall") {
+		action, args = args[0], args[1:]
+	}
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	addr := flags.String("addr", defaultServeAddr, "loopback address to listen on")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if action != "" {
+		return serviceCmd(action, *addr, stdout)
 	}
 	host, port, err := loopbackPort(*addr)
 	if err != nil {
@@ -94,6 +101,8 @@ func newServeHandler(home, host string, port int) http.Handler {
 	mux.HandleFunc("GET /memories", func(w http.ResponseWriter, r *http.Request) { serveMemories(w, r, home) })
 	mux.HandleFunc("GET /memories/{id}", func(w http.ResponseWriter, r *http.Request) { serveMemory(w, r, home) })
 	mux.HandleFunc("POST /memories/{id}/forget", func(w http.ResponseWriter, r *http.Request) { serveForget(w, r, home) })
+	mux.HandleFunc("GET /sessions", func(w http.ResponseWriter, r *http.Request) { serveSessions(w, r, home) })
+	mux.HandleFunc("GET /sessions/{id}", func(w http.ResponseWriter, r *http.Request) { serveSession(w, r, home) })
 	mux.HandleFunc("GET /discover", func(w http.ResponseWriter, r *http.Request) { serveDiscover(w, r, home) })
 	mux.HandleFunc("POST /memories/{id}/rate", func(w http.ResponseWriter, r *http.Request) { serveRate(w, r, home) })
 	mux.HandleFunc("POST /replay", func(w http.ResponseWriter, r *http.Request) { serveReplay(w, r, home) })

@@ -116,6 +116,7 @@ fails processing is quarantined in `spool/bad` while the rest commit.
     inscribe stats [--days N] [--all] [--explain] [--json]
     inscribe stats ingest --catch-up [--limit N]
     inscribe serve [--addr 127.0.0.1:7331]
+    inscribe serve install|uninstall [--addr 127.0.0.1:7331]
     inscribe mcp
 
 `inscribe serve` opens a local dashboard at http://127.0.0.1:7331: how often recalled
@@ -123,6 +124,13 @@ lines were rated helpful, tokens injected per hook, the score model, a recall pr
 that writes nothing, a searchable memory list with each memory's ratings and evidence
 (and a Forget button), how inscribe works, and a settings form for the scalar keys of
 `config.toml`. It listens on loopback only and refuses other hosts and cross-site posts.
+The Sessions page lists recent sessions as open, idle or closed, with the memories
+each one captured and the memories it was shown.
+
+`inscribe serve install` keeps the dashboard running in the background and starts it
+at login: a launchd agent on macOS, a systemd user unit on Linux. It logs to
+`~/.inscribe/serve.log`; `inscribe update` restarts it, and `inscribe serve uninstall`
+(or `inscribe uninstall`) removes it.
 
 When a session ends, the idle `score train` pass writes a `session` memory for it:
 what was asked, the files changed, and the commands that passed, built from the

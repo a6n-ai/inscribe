@@ -34,7 +34,10 @@ func updateCmd(stdout, stderr io.Writer) error {
 	cmd := exec.Command("sh", "-c", `curl --proto '=https,file' --tlsv1.2 -fsSL "$INSCRIBE_SCRIPT" | sh`) //nolint:gosec // G204: fixed script text
 	cmd.Env = append(os.Environ(), "INSCRIBE_SCRIPT="+url, "INSCRIBE_INSTALL_DIR="+filepath.Dir(bin))
 	cmd.Stdout, cmd.Stderr = stdout, stderr
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	return restartService(stdout)
 }
 
 // brewManaged reports whether path is inside a Homebrew Caskroom.
