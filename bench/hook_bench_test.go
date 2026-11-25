@@ -26,7 +26,12 @@ const (
 	seedProjects = 100
 )
 
-var promptPayload = []byte(`{"session_id":"bench-live","cwd":"/work/proj-0","hook_event_name":"UserPromptSubmit","prompt":"how do we deploy the service to staging"}`)
+// promptPayload is one sample's prompt. Each sample is its own session: recall
+// does not repeat lines a session was already shown, so one session would
+// inject nothing after its first prompt.
+func promptPayload(i int) []byte {
+	return fmt.Appendf(nil, `{"session_id":"bench-live-%d","cwd":"/work/proj-0","hook_event_name":"UserPromptSubmit","prompt":"how do we deploy the service to staging"}`, i)
+}
 
 func BenchmarkHookPrompt(b *testing.B) {
 	home, bin := setup(b)
@@ -85,10 +90,11 @@ func setup(b *testing.B) (home, bin string) {
 // measure runs the hook once per sample and reports the p95 latency.
 func measure(b *testing.B, bin, home string) {
 	durs := make([]time.Duration, 0, b.N)
-	for range b.N {
+	run := time.Now().UnixNano() // sessions from an earlier run on the cached store stay distinct
+	for i := range b.N {
 		cmd := exec.Command(bin, "hook", "--agent", "claude-code", "UserPromptSubmit")
 		cmd.Env = append(os.Environ(), "INSCRIBE_HOME="+home)
-		cmd.Stdin = bytes.NewReader(promptPayload)
+		cmd.Stdin = bytes.NewReader(promptPayload(int(run%1e9) + i))
 		var out bytes.Buffer
 		cmd.Stdout = &out
 		start := time.Now()
