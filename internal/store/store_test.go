@@ -59,6 +59,46 @@ func TestPragmas(t *testing.T) {
 	}
 }
 
+func TestCloseTruncatesWALWhileAnotherProcessReads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "inscribe.db")
+	reader, err := Open(path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reader.Close() }()
+	var n int
+	if err := reader.db.QueryRow("SELECT count(*) FROM events").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	w, err := Open(path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	big := string(make([]byte, 4000))
+	err = w.Write(context.Background(), func(tx *Tx) error {
+		for i := range 2000 {
+			e := event(strconv.Itoa(i))
+			e.PromptText = big
+			if _, err := tx.InsertEvent(e); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(path + "-wal"); err != nil || fi.Size() < 1<<20 {
+		t.Fatalf("wal before close: %v %v, want over 1 MB", fi, err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(path + "-wal"); err == nil && fi.Size() > 0 {
+		t.Fatalf("wal after close = %d bytes, want 0 while a reader stays open", fi.Size())
+	}
+}
+
 func event(digest string) *model.Event {
 	return &model.Event{TS: 1000, Agent: "claude-code", Session: "s1", Project: "/p", Kind: model.Prompt, PromptText: "hi", Digest: digest}
 }

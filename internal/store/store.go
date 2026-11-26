@@ -76,7 +76,7 @@ func Open(path string, readOnly bool) (*Store, error) {
 		}
 		_ = f.Close()
 	}
-	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(20)&_pragma=foreign_keys(1)&_txlock=immediate"
+	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(20)&_pragma=journal_size_limit(67108864)&_pragma=foreign_keys(1)&_txlock=immediate"
 	if readOnly {
 		dsn += "&mode=ro"
 	}
@@ -102,7 +102,16 @@ func Open(path string, readOnly bool) (*Store, error) {
 	return s, nil
 }
 
-func (s *Store) Close() error { return s.db.Close() }
+// Close checkpoints the WAL back into the database and truncates it, then closes.
+// Long-lived readers (mcp, serve) keep the WAL from being deleted, and without
+// a truncate it stays at its largest size. A busy checkpoint is skipped: the
+// next close tries again.
+func (s *Store) Close() error {
+	if !s.readOnly {
+		_, _ = s.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+	}
+	return s.db.Close()
+}
 
 // Path is the database file path.
 func (s *Store) Path() string { return s.path }
