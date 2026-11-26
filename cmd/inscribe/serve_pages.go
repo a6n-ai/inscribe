@@ -588,7 +588,7 @@ func ff(f float64) string { return strconv.FormatFloat(f, 'g', -1, 64) }
 var settings = []setting{
 	{"recall", "inject", "bool", "Add recalled lines to sessions. Off stops all injection.", nil, func(c config.Config) string { return fb(c.Recall.Inject) }},
 	{"recall", "session_budget", "int", "Token budget for the lines added at session start.", nil, func(c config.Config) string { return fi(c.Recall.SessionBudget) }},
-	{"recall", "subagent_budget", "int", "Token budget for a subagent start; 0 is off. Lines the session already showed are never repeated.", nil, func(c config.Config) string { return fi(c.Recall.SubagentBudget) }},
+	{"recall", "subagent_budget", "int", "Token budget for a subagent start; 0 is off. Sent even when the session already showed the lines: a subagent starts with a fresh context.", nil, func(c config.Config) string { return fi(c.Recall.SubagentBudget) }},
 	{"recall", "cross_project", "float", "Score scale for notes, decisions, fixes and project facts from your other projects, 0 to 1; 0 keeps recall inside the current project. A repository cannot change it.", nil, func(c config.Config) string { return ff(c.Recall.CrossProject) }},
 	{"recall", "prompt_max_lines", "int", "Most lines added to one prompt.", nil, func(c config.Config) string { return fi(c.Recall.PromptMaxLines) }},
 	{"recall", "prompt_threshold", "float", "Lowest score a line needs to be added to a prompt.", nil, func(c config.Config) string { return ff(c.Recall.PromptThreshold) }},

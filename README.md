@@ -147,7 +147,7 @@ Recall settings in `[recall]` beyond the budgets:
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `subagent_budget` | `80` | Token budget for a subagent start; `0` is off. Lines the session already showed are never repeated. |
+| `subagent_budget` | `80` | Token budget for a subagent start; `0` is off. A subagent starts with a fresh context, so it gets its lines even when the session already showed them. |
 | `subagent_skip` | `["Explore", "Plan", "claude-code-guide", "statusline-setup", "web-fetch"]` | Subagent types that get no injection. Each subagent injection records its type. |
 | `cross_project` | `0.6` | Score scale for notes, decisions, fixes and project facts from your other projects on a prompt, and lets MCP `recall` read another project; `0` keeps recall inside the current project. Only the global `config.toml` may set it. |
 

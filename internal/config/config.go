@@ -31,8 +31,8 @@ type Config struct {
 type RecallCfg struct {
 	Inject        bool `toml:"inject"`
 	SessionBudget int  `toml:"session_budget"`
-	// SubagentBudget caps what a subagent start injects; 0 turns it off. Lines the
-	// session already showed are never sent again.
+	// SubagentBudget caps what a subagent start injects; 0 turns it off. A subagent
+	// starts with a fresh context, so lines the session showed are sent again.
 	SubagentBudget int `toml:"subagent_budget"`
 	// SubagentSkip names subagent types that get no injection, such as read-only
 	// search agents that never run the commands memories are about.
