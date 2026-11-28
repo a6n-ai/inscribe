@@ -203,6 +203,21 @@ func TestSubagentBudgetZeroInjectsNothing(t *testing.T) {
 	}
 }
 
+func TestRecallIntentPromptAddsRecentSessions(t *testing.T) {
+	home, proj := t.TempDir(), t.TempDir()
+	prompt := func(session, text string) string {
+		return hookOK(t, home, map[string]any{"session_id": session, "cwd": proj, "hook_event_name": "UserPromptSubmit", "prompt": text}, "UserPromptSubmit")
+	}
+	prompt("old", "migrate the billing tables to postgres")
+	if out := prompt("new", "add a settings page"); strings.Contains(out, "[recent]") {
+		t.Fatalf("plain prompt got recent sessions: %s", out)
+	}
+	if ctx := additionalContext(t, prompt("new", "what did we do last time")); !strings.Contains(ctx, "[recent] this project") ||
+		!strings.Contains(ctx, "migrate the billing tables") {
+		t.Fatalf("additionalContext = %q", ctx)
+	}
+}
+
 func TestCUJ3KnownError(t *testing.T) {
 	home, proj := t.TempDir(), t.TempDir()
 	file := filepath.Join(proj, "auth.ts")
@@ -1333,8 +1348,10 @@ func TestSessionSummaryRecalledByALaterPrompt(t *testing.T) {
 	if !strings.Contains(ctx, "[session]") || !strings.Contains(ctx, "webhooks.go") {
 		t.Fatalf("later prompt context = %q, want the session summary", ctx)
 	}
-	if strings.Contains(ctx, "an old session") {
-		t.Fatalf("a session from before summaries started was summarized: %q", ctx)
+	for _, l := range strings.Split(ctx, "\n") {
+		if strings.HasPrefix(l, "[session]") && strings.Contains(l, "an old session") {
+			t.Fatalf("a session from before summaries started was summarized: %q", ctx)
+		}
 	}
 	start := hookOK(t, home, map[string]any{"session_id": "s3", "cwd": proj, "hook_event_name": "SessionStart"}, "SessionStart")
 	if strings.Contains(start, "[session]") {

@@ -122,12 +122,14 @@ func runHook(args []string, stdin io.Reader, stdout io.Writer) error {
 	if n := h.DroppedOutcomes(); n > 0 {
 		logLine(config.Home(), "recall: dropped %d outcome rows (store locked)", n)
 	}
-	if e.Kind == model.SessionStart {
+	if e.Kind == model.SessionStart || (q.Mode == recall.Prompt && recall.Intent(q.Text)) {
 		rs, err := h.RecentSessions(e.Session, recentScan)
 		if err != nil {
 			logLine(config.Home(), "recent sessions: %v", err)
 		}
 		lines = append(lines, recentLines(rs, e.Project, time.Now())...)
+	}
+	if e.Kind == model.SessionStart {
 		if h.StatsConfig().SessionLine {
 			if s, err := h.SessionLine(e.Project); err != nil {
 				logLine(config.Home(), "session line: %v", err)

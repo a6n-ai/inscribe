@@ -62,6 +62,8 @@ type Line struct {
 	Text     string
 	Score    float64
 	Repo     string // in a workspace session, the repo under it that the memory is from
+	// Unconfirmed marks a candidate, shown only to a prompt that asks to recall.
+	Unconfirmed bool
 }
 
 // Recall returns ranked lines for q, and marks them used. A nil src reads the store.
@@ -93,6 +95,11 @@ func Recall(ctx context.Context, st *store.Store, src Source, cfg config.RecallC
 		}
 		facets := chunkPrompt(q.Text, q.Agent)
 		windows := promptWindows(groups)
+		threshold, maxLines := cfg.PromptThreshold, cfg.PromptMaxLines
+		if Intent(q.Text) {
+			filter.Statuses = append(filter.Statuses, model.Candidate)
+			threshold, maxLines = min(threshold, intentThreshold), max(maxLines, intentMaxLines)
+		}
 		score := func(f store.ListFilter, facets Facets) ([]hit, error) {
 			if len(windows) == 1 {
 				return scoreAll(src, f, cfg, q, now, groups, flatten(groups), facets, w)
@@ -109,9 +116,9 @@ func Recall(ctx context.Context, st *store.Store, src Source, cfg config.RecallC
 				return nil, err
 			}
 		}
-		hits = dropBelow(hits, cfg.PromptThreshold)
+		hits = dropBelow(dropCochangeCandidates(hits), threshold)
 		hits = dropRepeats(st, hits, q)
-		hits = trimHits(hits, q.Budget, promptLineCap(len(windows), cfg.PromptMaxLines))
+		hits = trimHits(hits, q.Budget, promptLineCap(len(windows), maxLines))
 	case PostToolError:
 		if q.ErrorSignature == "" {
 			return nil, nil
@@ -161,7 +168,7 @@ func scoreAll(src Source, f store.ListFilter, cfg config.RecallCfg, q Query, now
 				continue
 			}
 		}
-		hits = append(hits, hit{Line: Line{MemoryID: m.ID, Key: m.Key, Type: m.Type, Text: m.Text, Score: score, Repo: repoOf(m, f)}, feat: feat, kind: m.ScopeKind, scope: m.Scope})
+		hits = append(hits, hit{Line: Line{MemoryID: m.ID, Key: m.Key, Type: m.Type, Text: m.Text, Score: score, Repo: repoOf(m, f), Unconfirmed: m.Status == model.Candidate}, feat: feat, kind: m.ScopeKind, scope: m.Scope})
 	}
 	sortHits(hits)
 	return hits, nil

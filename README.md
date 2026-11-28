@@ -138,6 +138,11 @@ stored events with no model call. A later prompt in the same project recalls it
 ("what did we change for the webhooks?") instead of searching old transcripts.
 Summaries start with the first pass after install; older sessions get none.
 
+A prompt that asks about past work ("did we", "last time", "earlier", "like
+before") gets a wider recall: unconfirmed candidates too, marked
+`(unconfirmed)`, a lower score threshold (0.3), up to 4 lines, and the recent
+sessions list.
+
 Session-start and subagent lines are never rated by the agent. `inscribe score
 replay` rates their command lines from what the session ran next: the command
 ran and passed is helpful; a different command of the same kind, or a failure,

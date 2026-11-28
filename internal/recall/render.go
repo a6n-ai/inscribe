@@ -6,10 +6,14 @@ func renderLine(l Line) string {
 	if l.Type == HoldoutType {
 		return ""
 	}
+	s := "[" + string(l.Type) + "] "
 	if l.Repo != "" {
-		return "[" + string(l.Type) + "] (" + l.Repo + ") " + l.Text
+		s += "(" + l.Repo + ") "
 	}
-	return "[" + string(l.Type) + "] " + l.Text
+	if l.Unconfirmed {
+		s += "(unconfirmed) "
+	}
+	return s + l.Text
 }
 
 // Render formats lines for injection, one per line.

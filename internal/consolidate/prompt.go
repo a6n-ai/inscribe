@@ -17,7 +17,7 @@ Propose changes that make the memories accurate, concise, and useful. Do only th
    session's events show it again or rely on it. Promote an existing candidate instead of adding it again.
 3. reject: forget a memory that is wrong or no longer true.
 4. add: record a decision the session's events clearly show. Cite the event ids that show it.
-   It starts as a candidate and is shown to future sessions only once a later review promotes it.
+   It starts as a candidate: shown, marked unconfirmed, only to prompts that ask to recall, until a later review promotes it.
    Add only what a future session would get wrong without it: a choice and its reason, a constraint,
    a gotcha, a convention. Do not add what the agent can read from the code, config, package files, or
    git history (file moves, renames, version pins, what a function does), one-off task status, or a
